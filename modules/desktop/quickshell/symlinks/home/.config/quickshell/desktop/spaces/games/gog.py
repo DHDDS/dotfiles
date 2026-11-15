@@ -181,6 +181,7 @@ def read(env, which, runner):
     return {
         'available': bool(command),
         'command': command,
+        'configRoot': str(root),
         'ownershipKnown': ownership_known,
         'installationKnown': installation_known,
         'ownedIds': list(owned) if ownership_known else [],

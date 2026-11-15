@@ -38,7 +38,7 @@ ColumnLayout {
             objectName: "streamingPlay"
             text: "Watch"
             iconName: "play"
-            idleColor: MovieStyle.accent
+            primary: true
             enabled: !root.controller.commandPending && !root.controller.playOpening && !root.accessNotice
             onClicked: root.controller.play(false)
         }

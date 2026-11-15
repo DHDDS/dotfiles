@@ -7,6 +7,7 @@ Button {
 
     property string iconName: ""
     property color idleColor: "transparent"
+    property bool primary: false
     readonly property int iconSlot: iconName ? 28 : 0
 
     highlighted: checked
@@ -46,9 +47,9 @@ Button {
 
     background: Rectangle {
         radius: MovieStyle.controlRadius
-        color: root.down ? "#66e50914" : root.highlighted ? MovieStyle.accentSurface : root.hovered ? "#20ffffff" : root.idleColor
+        color: root.primary ? MovieStyle.primaryColor(root.down, root.hovered) : root.down ? "#66e50914" : root.highlighted ? MovieStyle.accentSurface : root.hovered ? "#20ffffff" : root.idleColor
         border.width: root.visualFocus ? 2 : 0
-        border.color: MovieStyle.accent
+        border.color: root.primary ? MovieStyle.text : MovieStyle.accent
 
         Behavior on color {
             ColorAnimation {

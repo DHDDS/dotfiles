@@ -3,8 +3,9 @@
 ## Presentation and lifecycle
 
 `Main.qml` is a retained `SpaceState` / `SpaceHost` page using the immersive
-`MovieStyle` palette and existing controls. `VideoCard.qml` presents virtualized
-16:9 thumbnails. The toolbar is reparented into the host. The default layout puts
+`MovieStyle` palette and existing controls. `VideoCard.qml` adapts the shared
+`ArtworkCard` to virtualized 16:9 thumbnails with creator and video badges. The
+toolbar is reparented into the host. The default layout puts
 details at the left over a cinematic backdrop, with a horizontal bottom rail.
 The alternate layout puts a grid at the left and details at the right; narrow
 outputs stack them. The same `MovieBackdrop` and directional scrims as Movies
@@ -13,7 +14,10 @@ and Downloads tabs and a plain Watch action. mpv owns playback quality. Discover
 and Posts retain queries, results, selections, detail tabs and scroll positions
 in memory. The toolbar's right-side search queries YouTube
 from Discover and filters Posts in its own view.
-Escape dismisses channels/operations, detail tabs and search before hiding.
+Escape dismisses channels/notifications, detail tabs and search before hiding.
+Following uses the image gallery's `MovieStyle.background`, border and corner
+radius. Followed channel names align to the left of their actions. The bell uses
+the shared `OperationCenter` for progress, cancellation and analysis results.
 
 The video rail/grid and Posts list request the next page near their visible end
 through one debounced page-owned timer. Short or membership-filtered pages fill
@@ -29,7 +33,7 @@ their own bounded lane; mutations/player commands are ordered through the shared
 worker's control lane. Browse/detail generations discard stale responses. Hidden
 pages stop player polling and visual work, while accepted jobs continue polling
 to deliver completion/error notifications. Notified outcomes are not repeated in
-the page error banner; Operations retains the job details. Video handoff hides
+the page error banner; Notifications retains the job details. Video handoff hides
 the Space using its owner-scoped host only once mpv reports a playback position,
 so failed opens leave the error visible. Audio playback leaves it visible. Close
 terminates this worker's commands, transfer staging directories and mpv process

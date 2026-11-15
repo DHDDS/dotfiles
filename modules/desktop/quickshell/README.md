@@ -54,7 +54,7 @@ from Spaces to release it.
   and [TV Series](symlinks/home/.config/quickshell/desktop/spaces/series/README.md):
   discovery, local libraries, subtitles and downloads.
 - [Games](symlinks/home/.config/quickshell/desktop/spaces/games/README.md):
-  Steam/Epic/GOG libraries, discovery and compatibility information.
+  Steam/Epic/GOG/itch.io libraries, discovery, compatibility information and launch settings.
 - [Books](symlinks/home/.config/quickshell/desktop/spaces/books/README.md)
   and [Pictures](symlinks/home/.config/quickshell/desktop/spaces/pictures/README.md):
   ebook libraries and desktop wallpapers.

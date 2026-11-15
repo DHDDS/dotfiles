@@ -3,8 +3,9 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
-Popup {
+MovieStyle.Panel {
     id: root
+    fullArea: true
 
     property var cacheService: ImageCache
     property var images: []
@@ -30,14 +31,8 @@ Popup {
     }
 
     objectName: "movieGallery"
-    width: parent.width
-    height: parent.height
     // Keep the host's top-left hide control reachable outside the page.
     modal: false
-    popupType: Popup.Item
-    focus: true
-    padding: 14
-    closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
     onCurrentIndexChanged: {
         pan.contentX = 0;
         pan.contentY = 0;
@@ -49,12 +44,6 @@ Popup {
             returnFocus.forceActiveFocus();
 
         returnFocus = null;
-    }
-
-    background: Rectangle {
-        color: MovieStyle.background
-        border.color: MovieStyle.border
-        radius: MovieStyle.radius
     }
 
     contentItem: ColumnLayout {
@@ -79,11 +68,10 @@ Popup {
         RowLayout {
             Layout.fillWidth: true
 
-            MovieText {
+            MovieStyle.PanelTitle {
                 text: root.title
                 Layout.fillWidth: true
                 elide: Text.ElideRight
-                font.bold: true
             }
 
             MovieText {
@@ -96,8 +84,7 @@ Popup {
                 onClicked: root.zoomed = !root.zoomed
             }
 
-            MovieIconButton {
-                iconName: "x"
+            MovieStyle.PanelClose {
                 text: "Close gallery"
                 onClicked: root.close()
             }

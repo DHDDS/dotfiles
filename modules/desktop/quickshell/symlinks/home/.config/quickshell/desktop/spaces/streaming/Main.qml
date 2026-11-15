@@ -57,7 +57,7 @@ Item {
     property string answer: ""
     property string answeredQuestion: ""
     property bool channelsOpen: false
-    property bool jobsOpen: false
+    readonly property bool jobsOpen: activity.visible
     readonly property bool narrow: width < 900
 
     Worker {
@@ -68,6 +68,28 @@ Item {
         spaceId: "streaming"
         serviceName: "Streaming"
         onFailed: message => root.error = message
+    }
+    OperationCenter {
+        id: activity
+        objectName: "streamingJobsPanel"
+        parent: root
+        heading: "Notifications"
+        iconName: "bell"
+        showEmpty: true
+        onVisibleChanged: if (visible)
+            root.channelsOpen = false
+        jobs: root.jobs.map(job => Object.assign({}, job, {
+                actionLabel: job.state === "finished" && job.result?.kind === "analysis" ? "Read answer" : ""
+            }))
+        onCancelRequested: id => root.command("cancel", { job_id: id }, () => root.pollJobs())
+        onActionRequested: job => {
+            const value = job.result;
+            root.select({ id: value.videoId, title: "YouTube video", creator: "" });
+            root.answer = value.text;
+            root.answeredQuestion = value.question || "Summary";
+            root.detailTab = "summary";
+            close();
+        }
     }
     ListModel {
         id: videoModel
@@ -326,6 +348,10 @@ Item {
                 if (op === "play") {
                     detailError = failure;
                     playOpening = false;
+                } else if (op === "download" || op === "analyze") {
+                    const title = op === "analyze" ? "Analyze video" : "Download";
+                    activity.reportError(title, failure);
+                    root.notify(["notify-send", "-a", "Streaming", title, failure]);
                 } else
                     error = failure;
                 return;
@@ -442,7 +468,8 @@ Item {
     }
     function dismissTransient() {
         if (channelsOpen || jobsOpen) {
-            channelsOpen = jobsOpen = false;
+            channelsOpen = false;
+            activity.close();
             return true;
         }
         if (detailTab !== "overview") {
@@ -495,7 +522,8 @@ Item {
     }
     onActiveChanged: {
         if (!active) {
-            channelsOpen = jobsOpen = false;
+            channelsOpen = false;
+            activity.close();
             searchDelay.stop();
             pagination.stop();
         } else if (initialized) {
@@ -585,13 +613,18 @@ Item {
         }
         MovieInput {
             id: search
+            clearable: true
             objectName: "streamingSearch"
             visible: root.searchOpen
             Layout.preferredWidth: Math.min(320, root.width * 0.3)
             Layout.minimumWidth: 90
             placeholderText: root.tab === "feed" ? "Search YouTube or paste a URL" : root.tab === "posts" ? "Search posts" : "Filter videos"
-            onAccepted: root.browse(false)
+            onAccepted: {
+                searchDelay.stop();
+                root.browse(false);
+            }
             onTextEdited: searchDelay.restart()
+            onCleared: searchDelay.restart()
         }
         Item {
             Layout.preferredWidth: 28
@@ -604,6 +637,8 @@ Item {
             }
         }
         MovieIconButton {
+            toolbar: true
+            objectName: "streamingSearchButton"
             iconName: "search"
             text: "Search videos"
             highlighted: root.searchOpen
@@ -611,15 +646,22 @@ Item {
                 root.searchOpen = !root.searchOpen;
                 if (root.searchOpen)
                     search.forceActiveFocus();
+                else if (search.text) {
+                    search.clear();
+                    searchDelay.stop();
+                    root.browse(false);
+                }
             }
         }
         MovieIconButton {
+            toolbar: true
             iconName: "refresh-cw"
             text: "Refresh"
             enabled: root.initialized && !root.loading
             onClicked: root.browse(false, true)
         }
         MovieIconButton {
+            toolbar: true
             objectName: "streamingLayoutToggle"
             visible: root.tab !== "posts"
             iconName: root.gridMode ? "panels-top-left" : "layout-grid"
@@ -627,22 +669,24 @@ Item {
             onClicked: root.toggleLayout()
         }
         MovieIconButton {
+            toolbar: true
             objectName: "streamingChannels"
-            iconName: "video"
-            text: "Follow channels"
+            iconName: "settings"
+            text: "Settings"
             onClicked: {
                 root.channelsOpen = !root.channelsOpen;
-                root.jobsOpen = false;
+                activity.close();
             }
         }
         MovieIconButton {
+            toolbar: true
             objectName: "streamingJobs"
             iconName: "bell"
-            text: root.jobsActive ? "Operations in progress" : "Operations"
+            text: "Notifications"
             highlighted: root.jobsActive
             onClicked: {
-                root.jobsOpen = !root.jobsOpen;
                 root.channelsOpen = false;
+                activity.visible ? activity.close() : activity.showActivity();
                 root.pollJobs();
             }
         }
@@ -764,27 +808,22 @@ Item {
                 color: MovieStyle.muted
                 text: search.text.trim() || root.channels.length ? "No public videos found. Try another search or refresh the feed." : "Follow your favorite channels to build your feed.\nSearch YouTube to find something to watch."
             }
-            Rectangle {
+            MovieStyle.PanelSurface {
                 objectName: "streamingChannelsPanel"
                 visible: root.channelsOpen
                 anchors.fill: parent
-                color: MovieStyle.surface
-                radius: 12
                 z: 5
                 ColumnLayout {
                     anchors.fill: parent
-                    anchors.margins: 20
+                    anchors.margins: MovieStyle.panelPadding
                     spacing: 12
                     RowLayout {
                         Layout.fillWidth: true
-                        MovieText {
+                        MovieStyle.PanelTitle {
                             Layout.fillWidth: true
                             text: "Following"
-                            font.pixelSize: 24
-                            font.bold: true
                         }
-                        MovieIconButton {
-                            iconName: "x"
+                        MovieStyle.PanelClose {
                             text: "Close channels"
                             onClicked: root.channelsOpen = false
                         }
@@ -815,8 +854,14 @@ Item {
                             required property var modelData
                             width: ListView.view.width
                             MovieButton {
+                                id: followedChannel
                                 Layout.fillWidth: true
                                 text: modelData.name
+                                contentItem: MovieText {
+                                    text: followedChannel.text
+                                    elide: Text.ElideRight
+                                    verticalAlignment: Text.AlignVCenter
+                                }
                                 onClicked: {
                                     root.channel = modelData.url;
                                     root.tab = "feed";
@@ -847,103 +892,6 @@ Item {
                             root.channelsOpen = false;
                             root.browse(false);
                         }
-                    }
-                }
-            }
-            Rectangle {
-                objectName: "streamingJobsPanel"
-                visible: root.jobsOpen
-                anchors.fill: parent
-                color: MovieStyle.surface
-                radius: 12
-                z: 5
-                ColumnLayout {
-                    anchors.fill: parent
-                    anchors.margins: 20
-                    spacing: 12
-                    RowLayout {
-                        Layout.fillWidth: true
-                        MovieText {
-                            Layout.fillWidth: true
-                            text: "Operations"
-                            font.pixelSize: 24
-                            font.bold: true
-                        }
-                        MovieIconButton {
-                            iconName: "x"
-                            text: "Close operations"
-                            onClicked: root.jobsOpen = false
-                        }
-                    }
-                    ListView {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        clip: true
-                        model: root.jobs
-                        spacing: 16
-                        delegate: ColumnLayout {
-                            required property var modelData
-                            width: ListView.view.width
-                            spacing: 6
-                            MovieText {
-                                Layout.fillWidth: true
-                                text: modelData.title
-                                font.bold: true
-                            }
-                            MovieText {
-                                Layout.fillWidth: true
-                                text: modelData.error || modelData.detail
-                                wrapMode: Text.Wrap
-                                color: modelData.state === "failed" ? MovieStyle.danger : MovieStyle.muted
-                            }
-                            ProgressBar {
-                                Layout.fillWidth: true
-                                visible: ["queued", "running"].includes(modelData.state)
-                                from: 0
-                                to: Math.max(1, modelData.total)
-                                value: modelData.done
-                                indeterminate: !modelData.total
-                                background: Rectangle {
-                                    implicitHeight: 4
-                                    color: MovieStyle.border
-                                    radius: 2
-                                }
-                                contentItem: Item {
-                                    implicitHeight: 4
-                                    Rectangle {
-                                        width: parent.width * (modelData.total > 0 ? Math.min(1, modelData.done / modelData.total) : 0.2)
-                                        height: 4
-                                        color: MovieStyle.accent
-                                        radius: 2
-                                    }
-                                }
-                            }
-                            MovieButton {
-                                visible: ["queued", "running"].includes(modelData.state)
-                                text: modelData.cancel_requested ? "Cancelling…" : "Cancel"
-                                enabled: !modelData.cancel_requested
-                                onClicked: root.command("cancel", {
-                                    job_id: modelData.job_id
-                                }, () => root.pollJobs())
-                            }
-                            MovieButton {
-                                visible: modelData.state === "finished" && modelData.result?.kind === "analysis"
-                                text: "Read answer"
-                                onClicked: {
-                                    const value = modelData.result;
-                                    root.select({
-                                        id: value.videoId,
-                                        title: "YouTube video",
-                                        creator: ""
-                                    });
-                                    root.answer = value.text;
-                                    root.answeredQuestion = value.question || "Summary";
-                                    root.detailTab = "summary";
-                                    root.jobsOpen = false;
-                                }
-                            }
-                        }
-                        ScrollBar.vertical: MovieScrollBar {}
                     }
                 }
             }

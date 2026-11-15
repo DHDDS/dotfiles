@@ -46,12 +46,32 @@ Item {
     property bool searchOpen: false
     property bool filtersOpen: false
     property string tab: "overview"
+    readonly property bool libraryGame: !!selected.libraryEntry || (selected.ownedBy || []).length > 0 || (selected.installedBy || []).length > 0
+    readonly property bool canFind: mode !== "library" && !libraryGame
+    property string preferredStore: ""
+    property var settingsState: ({
+            defaults: {
+                overlay: "off",
+                proton: ""
+            },
+            runners: []
+        })
+    property var gameSettings: []
+    property bool settingsLoading: false
+    property bool gameSettingsLoading: false
+    property bool settingsSaving: false
+    property string settingsError: ""
+    property string settingsMessage: ""
+    property int settingsGeneration: 0
+    property int gameSettingsGeneration: 0
     property var localFiles: []
     property bool loading: false
     property bool initializing: true
     property bool detailLoading: false
     property bool actionBusy: false
     property var installJobs: []
+    property bool installsLoaded: false
+    property var deliverInstallNotification: (title, body) => Quickshell.execDetached(["notify-send", "--app-name=Games", "--", title, String(body).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")])
     property bool installsLoading: false
     property string installsError: ""
     property bool installsChanged: false
@@ -148,6 +168,11 @@ Item {
     }
 
     function dismissTransient() {
+        if (globalSettings.visible) {
+            if (!globalSettings.dismissPicker())
+                globalSettings.close();
+            return true;
+        }
         if (downloads.dismissTransient())
             return true;
         if (gallery.visible) {
@@ -162,6 +187,21 @@ Item {
             matching.close();
             return true;
         }
+        if (globalSettings.dismissPicker())
+            return true;
+        if (preferredCopy.popup.visible) {
+            preferredCopy.popup.close();
+            return true;
+        }
+        for (let index = 0; index < gameSettingRows.count; ++index) {
+            const row = gameSettingRows.itemAt(index);
+            if (row?.closePicker())
+                return true;
+        }
+        if (globalSettings.visible) {
+            globalSettings.close();
+            return true;
+        }
         if (closeStoreMenus())
             return true;
         for (const picker of [libraryChoice, genre, platform, sort]) {
@@ -170,9 +210,12 @@ Item {
                 return true;
             }
         }
+        if (search.text) {
+            search.clear();
+            return true;
+        }
         if (searchOpen) {
             searchOpen = false;
-            search.clear();
             return true;
         }
         if (filtersOpen) {
@@ -183,9 +226,15 @@ Item {
     }
     onActiveChanged: {
         if (!active) {
+            downloads.closeJobPanel();
             gallery.close();
             matching.close();
             uninstall.close();
+            globalSettings.close();
+            globalSettings.closePickers();
+            preferredCopy.popup.close();
+            for (let index = 0; index < gameSettingRows.count; ++index)
+                gameSettingRows.itemAt(index)?.closePickers();
             closeStoreMenus();
             for (const picker of [libraryChoice, genre, platform, sort])
                 picker.popup.close();
@@ -196,6 +245,8 @@ Item {
             contentDelay.stop();
             pagination.stop();
         } else {
+            if (tab === "settings")
+                loadGameSettings();
             if (installsChanged) {
                 installsChanged = false;
                 browse(false);
@@ -418,6 +469,10 @@ Item {
             });
         compatibility = ({});
         localFiles = [];
+        gameSettings = [];
+        preferredStore = "";
+        ++gameSettingsGeneration;
+        gameSettingsLoading = false;
         detailLoading = false;
         detailError = "";
     }
@@ -457,7 +512,9 @@ Item {
                         root.detailError = failure;
                         return;
                     }
-                    const action = (result.stores || []).reduce((actions, store) => actions.concat(store.actions || []), []).find(action => action.type === "play");
+                    const stores = result.stores || [];
+                    const preferred = stores.find(store => store.store === result.preferredStore);
+                    const action = (preferred?.actions || []).find(action => action.type === "play") || stores.reduce((actions, store) => actions.concat(store.actions || []), []).find(action => action.type === "play");
                     if (action)
                         root.execute(action);
                     else
@@ -539,7 +596,8 @@ Item {
     function maybeLoadMore() {
         if (!active || loading || !nextOffset || (hideNsfw && (contentBusy || contentQueue.length)))
             return;
-        const nearEnd = gridMode ? grid.contentY + grid.height >= grid.contentHeight - grid.cellHeight * 2 : rail.contentX + rail.width >= rail.contentWidth - rail.width / 2;
+        // Qt shifts the content origin when filtered rows are inserted/removed.
+        const nearEnd = gridMode ? grid.contentY - grid.originY + grid.height >= grid.contentHeight - grid.cellHeight * 2 : rail.contentX - rail.originX + rail.width >= rail.contentWidth - rail.width / 2;
         if (nearEnd)
             browse(true);
     }
@@ -596,7 +654,10 @@ Item {
         }, (result, failure) => {
             actionBusy = false;
             if (failure) {
-                detailError = failure;
+                if (action.type === "install")
+                    downloads.reportOperationFailure("Game installation", failure);
+                else
+                    detailError = failure;
                 return;
             }
             if (result.job) {
@@ -668,6 +729,13 @@ Item {
             if (failure)
                 return;
             const finished = (result || []).some(job => job.state !== "running" && installJobs.some(previous => previous.id === job.id && previous.state === "running"));
+            if (installsLoaded) {
+                for (const job of result || []) {
+                    if (job.state !== "running" && installJobs.some(previous => previous.id === job.id && previous.state === "running"))
+                        deliverInstallNotification(job.title || "Game installation", job.state === "completed" ? "Installation complete." : job.detail || "Installation failed.");
+                }
+            }
+            installsLoaded = true;
             installJobs = result || [];
             if (finished) {
                 service.request("refresh_libraries", {}, (state, refreshFailure) => {
@@ -727,6 +795,145 @@ Item {
             }
             genreOptions = result.genres || [];
             platformOptions = result.platforms || [];
+        });
+    }
+    function loadSettings() {
+        const generation = ++settingsGeneration;
+        settingsLoading = true;
+        settingsError = "";
+        service.request("settings", {}, (result, failure) => {
+            if (generation !== settingsGeneration)
+                return;
+            settingsLoading = false;
+            if (failure)
+                settingsError = failure;
+            else
+                settingsState = result;
+        });
+    }
+    function loadGameSettings() {
+        if (!selected.id)
+            return;
+        const generation = ++gameSettingsGeneration;
+        gameSettingsLoading = true;
+        settingsError = "";
+        loadSettings();
+        service.request("game_settings", {
+            gameId: selected.id
+        }, (result, failure) => {
+            if (generation !== gameSettingsGeneration)
+                return;
+            gameSettingsLoading = false;
+            if (failure)
+                settingsError = failure;
+            else {
+                gameSettings = result.stores || [];
+                preferredStore = result.preferredStore || "";
+            }
+        });
+    }
+    onCanFindChanged: if (!canFind && tab === "torrent")
+        tab = "overview"
+    onTabChanged: if (tab === "settings" && active)
+        loadGameSettings()
+    function saveLaunchSettings(changes, store) {
+        const perGame = !!store;
+        const selection = selectionGeneration;
+        settingsSaving = true;
+        settingsError = "";
+        service.request("save_settings", {
+            gameId: perGame ? selected.id : "",
+            store: store || "epic",
+            settings: changes
+        }, (result, failure) => {
+            settingsSaving = false;
+            if (perGame && selection !== selectionGeneration)
+                return;
+            if (perGame) {
+                ++gameSettingsGeneration;
+                gameSettingsLoading = false;
+            } else {
+                ++settingsGeneration;
+                settingsLoading = false;
+            }
+            if (failure) {
+                settingsError = failure;
+                // Restore the saved selection after a rejected edit.
+                if (perGame)
+                    gameSettings = gameSettings.map(row => Object.assign({}, row));
+                else
+                    settingsState = Object.assign({}, settingsState);
+                return;
+            }
+            if (perGame)
+                gameSettings = gameSettings.map(row => row.store === store ? Object.assign({}, row, {
+                        settings: result.settings
+                    }) : row);
+            else
+                settingsState = Object.assign({}, settingsState, {
+                    defaults: result.settings
+                });
+        });
+    }
+    function settingsAction(action, store) {
+        settingsSaving = true;
+        settingsError = "";
+        service.request("settings_action", {
+            action: action,
+            store: store || "",
+            gameId: selected.id || ""
+        }, (result, failure) => {
+            settingsSaving = false;
+            if (failure)
+                settingsError = failure;
+            else {
+                settingsMessage = result.message || "";
+                if (result.refreshed) {
+                    browse(false, true);
+                    hydrateSelection(false);
+                }
+                if (result.handoff)
+                    host?.hide();
+                else if (tab === "settings" && (result.refreshed || action.endsWith("_setup")))
+                    loadGameSettings();
+                else
+                    loadSettings();
+            }
+        });
+    }
+    function setPreferredStore(store) {
+        const selection = selectionGeneration;
+        settingsSaving = true;
+        settingsError = "";
+        service.request("set_preferred_store", {
+            gameId: selected.id,
+            store: store
+        }, (result, failure) => {
+            settingsSaving = false;
+            if (selection !== selectionGeneration)
+                return;
+            if (failure)
+                settingsError = failure;
+            else
+                preferredStore = result.preferredStore || "";
+        });
+    }
+    function resetGameSettings() {
+        const selection = selectionGeneration;
+        settingsSaving = true;
+        settingsError = "";
+        service.request("reset_game_settings", {
+            gameId: selected.id
+        }, (result, failure) => {
+            settingsSaving = false;
+            if (selection !== selectionGeneration)
+                return;
+            if (failure)
+                settingsError = failure;
+            else {
+                gameSettings = result.stores || [];
+                preferredStore = "";
+            }
         });
     }
     Component.onCompleted: {
@@ -957,12 +1164,17 @@ Item {
         }
         MovieInput {
             id: search
+            clearable: true
             objectName: "gamesSearch"
             visible: root.searchOpen
             Layout.preferredWidth: Math.max(120, Math.min(260, root.width / 5))
             placeholderText: "Search games"
             Accessible.name: "Search games"
             onTextChanged: searchDelay.restart()
+            onAccepted: {
+                searchDelay.stop();
+                root.browse(false);
+            }
         }
         ActivityIndicator {
             Layout.preferredWidth: 28
@@ -973,6 +1185,8 @@ Item {
             tasks: [task(root.initializing, "init", "Opening Games…"), task(root.loading, "browse", "Loading games…"), task(root.detailLoading, "details", "Loading game details…"), task(root.actionBusy, "action", "Updating game library…"), task(service.pendingCount > (root.installsLoading ? 1 : 0) && !root.initializing && !root.loading && !root.detailLoading && !root.actionBusy, "information", "Loading game information…"), task(backdrop.loading || logo.loading, "artwork", "Loading artwork…"), task(root.tab === "torrent" && (downloads.searching || downloads.connectionLoading || downloads.reviewLoading), "find", "Loading downloads…")]
         }
         MovieIconButton {
+            toolbar: true
+            objectName: "gamesSearchButton"
             iconName: "search"
             text: "Search games"
             highlighted: root.searchOpen
@@ -985,10 +1199,11 @@ Item {
             }
         }
         MovieIconButton {
+            toolbar: true
             objectName: "gameFiltersButton"
             iconName: "sliders-horizontal"
             text: "Filters"
-            highlighted: root.filtersOpen
+            highlighted: root.filtersOpen || !root.hideNsfw || (root.mode === "library" ? root.libraryFilter !== "all" : root.mode === "discover" && MovieStyle.filtersActive(root.filters, { sort: "-added" }))
             onClicked: {
                 root.filtersOpen = !root.filtersOpen;
                 if (root.filtersOpen && root.mode === "discover" && root.catalogState.configured)
@@ -996,18 +1211,14 @@ Item {
             }
         }
         MovieIconButton {
+            toolbar: true
             iconName: "refresh-cw"
             text: "Refresh libraries and game information"
             enabled: !root.actionBusy
             onClicked: root.refreshLibraries()
         }
         MovieIconButton {
-            objectName: "gameDownloads"
-            iconName: "download"
-            text: "Downloads"
-            onClicked: downloads.showJobPanel()
-        }
-        MovieIconButton {
+            toolbar: true
             objectName: "catalogueLayoutToggle"
             iconName: root.gridMode ? "panels-top-left" : "layout-grid"
             text: root.gridMode ? "Show poster rail" : "Show grid"
@@ -1015,6 +1226,25 @@ Item {
                 root.gridMode = !root.gridMode;
                 preferences.setValue("catalogue/grid", root.gridMode);
             }
+        }
+        MovieIconButton {
+            toolbar: true
+            objectName: "gamesSettingsButton"
+            iconName: "settings"
+            text: "Games settings"
+            onClicked: {
+                root.settingsMessage = "";
+                root.loadSettings();
+                globalSettings.open();
+            }
+        }
+        MovieIconButton {
+            toolbar: true
+            objectName: "gameDownloads"
+            iconName: "bell"
+            text: "Notifications"
+            highlighted: root.installing || downloads.jobs.some(job => job.active)
+            onClicked: downloads.showJobPanel()
         }
     }
     ColumnLayout {
@@ -1047,7 +1277,7 @@ Item {
                 currentIndex: root.titles.findIndex(game => game.id === root.selected.id)
                 onCurrentIndexChanged: if (activeFocus && currentIndex >= 0)
                     root.selectGame(root.titles[currentIndex])
-                onContentYChanged: pagination.restart()
+                onContentYChanged: pagination.start()
                 ScrollBar.vertical: MovieScrollBar {}
                 WheelScroll {
                     view: grid
@@ -1230,9 +1460,8 @@ Item {
                     }
                     MovieIconButton {
                         objectName: "gameFavorite"
-                        text: root.selected.favorite ? "Remove favorite" : "Add favorite"
-                        iconName: root.selected.favorite ? "star-filled" : "star"
-                        highlighted: !!root.selected.favorite
+                        favoriteControl: true
+                        favorite: !!root.selected.favorite
                         onClicked: root.favorite()
                     }
                     MovieIconButton {
@@ -1273,8 +1502,16 @@ Item {
                     MovieTab {
                         objectName: "gameFindTab"
                         text: "Find"
+                        visible: root.canFind
                         highlighted: root.tab === "torrent"
                         onClicked: root.tab = "torrent"
+                    }
+                    MovieTab {
+                        objectName: "gameSettingsTab"
+                        text: "Settings"
+                        visible: root.libraryGame
+                        highlighted: root.tab === "settings"
+                        onClicked: root.tab = "settings"
                     }
                     Item {
                         Layout.fillWidth: true
@@ -1356,11 +1593,12 @@ Item {
                 }
                 TorrentSearch {
                     id: downloads
+                    jobPanelParent: root
                     showStatus: false
                     objectName: "gameFindContent"
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    visible: root.active && root.tab === "torrent"
+                    visible: root.active && root.canFind && root.tab === "torrent"
                     service: torrents
                     extraJobs: root.installJobs.map(job => Object.assign({}, job, {
                             detail: root.installLabel(job)
@@ -1372,6 +1610,129 @@ Item {
                         year: (root.selected.releaseDate || "").slice(0, 4)
                     })
                     onImported: root.loadLocalFiles()
+                    onReviewRequested: root.tab = "torrent"
+                }
+                ScrollArea {
+                    id: gameSettingsArea
+                    objectName: "gameSettingsContent"
+                    visible: root.tab === "settings"
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    contentWidth: availableWidth
+                    clip: true
+                    ColumnLayout {
+                        width: gameSettingsArea.availableWidth
+                        spacing: 16
+                        MovieText {
+                            Layout.fillWidth: true
+                            text: root.gameSettingsLoading || root.settingsLoading ? "Loading settings…" : root.settingsSaving ? "Saving…" : "Changes apply the next time you launch this game."
+                            color: MovieStyle.muted
+                            wrapMode: Text.Wrap
+                        }
+                        MovieText {
+                            Layout.fillWidth: true
+                            visible: !!root.settingsError
+                            text: root.settingsError
+                            color: MovieStyle.danger
+                            wrapMode: Text.Wrap
+                        }
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            Layout.maximumWidth: 620
+                            visible: root.gameSettings.length > 1
+                            spacing: 8
+                            MovieText {
+                                text: "Preferred store copy"
+                            }
+                            MovieChoice {
+                                id: preferredCopy
+                                objectName: "gamePreferredCopy"
+                                Layout.fillWidth: true
+                                model: [
+                                    {
+                                        id: "",
+                                        name: "Automatic"
+                                    }
+                                ].concat(root.gameSettings.map(store => ({
+                                            id: store.store,
+                                            name: store.label
+                                        })))
+                                textRole: "name"
+                                currentIndex: Math.max(0, model.findIndex(option => option.id === root.preferredStore))
+                                enabled: !root.settingsSaving && !root.gameSettingsLoading
+                                Accessible.name: "Preferred store copy"
+                                onActivated: root.setPreferredStore(model[currentIndex].id)
+                            }
+                        }
+                        MovieButton {
+                            objectName: "gameResetOverrides"
+                            visible: root.gameSettings.length > 0
+                            text: "Reset overrides"
+                            iconName: "rotate-ccw"
+                            enabled: !root.settingsSaving && !root.gameSettingsLoading
+                            onClicked: root.resetGameSettings()
+                        }
+                        Repeater {
+                            id: gameSettingRows
+                            model: root.gameSettings
+                            ColumnLayout {
+                                id: settingRow
+                                required property var modelData
+                                Layout.fillWidth: true
+                                spacing: 8
+                                function closePicker() {
+                                    return storeLaunch.dismissPicker();
+                                }
+                                function closePickers() {
+                                    storeLaunch.closePickers();
+                                }
+                                MovieText {
+                                    text: settingRow.modelData.label
+                                    font.bold: true
+                                    font.pixelSize: 20
+                                }
+                                LaunchSettings {
+                                    id: storeLaunch
+                                    Layout.fillWidth: true
+                                    Layout.maximumWidth: 620
+                                    settings: settingRow.modelData.settings
+                                    storeId: settingRow.modelData.store
+                                    showProton: settingRow.modelData.store === "epic"
+                                    supported: settingRow.modelData.store === "gog" ? !!root.settingsState.heroicHud : settingRow.modelData.store === "itch" ? !!root.settingsState.itchDirect : true
+                                    runners: root.settingsState.runners || []
+                                    inherit: true
+                                    busy: root.settingsLoading || root.settingsSaving || root.gameSettingsLoading
+                                    mangohud: !!root.settingsState.mangohud
+                                    umu: !!root.settingsState.umu
+                                    onEdited: changes => root.saveLaunchSettings(changes, settingRow.modelData.store)
+                                }
+                                Flow {
+                                    Layout.fillWidth: true
+                                    spacing: 8
+                                    MovieButton {
+                                        visible: settingRow.modelData.store === "steam" && !settingRow.modelData.performanceReady || settingRow.modelData.store === "gog" && (!root.settingsState.heroicHud || !settingRow.modelData.performanceReady) || settingRow.modelData.store === "itch" && !root.settingsState.itchDirect
+                                        text: settingRow.modelData.store === "steam" ? "Enable Steam performance controls" : settingRow.modelData.store === "gog" ? root.settingsState.heroicHud ? "Enable GOG performance controls" : "Install MangoHud for Heroic" : "Update itch"
+                                        enabled: !root.settingsSaving
+                                        onClicked: settingRow.modelData.store === "itch" ? root.openUrl("https://itch.io/app") : root.settingsAction(settingRow.modelData.store === "steam" ? "steam_setup" : root.settingsState.heroicHud ? "gog_setup" : "heroic_mangohud", settingRow.modelData.store)
+                                    }
+                                    MovieButton {
+                                        visible: !!settingRow.modelData.folder
+                                        text: "Open installation folder"
+                                        iconName: "folder-open"
+                                        enabled: !root.settingsSaving
+                                        onClicked: root.settingsAction("folder", settingRow.modelData.store)
+                                    }
+                                }
+                            }
+                        }
+                        MovieText {
+                            visible: !root.gameSettingsLoading && !root.gameSettings.length
+                            text: "Refresh your libraries to find settings for this game."
+                            Layout.fillWidth: true
+                            color: MovieStyle.muted
+                            wrapMode: Text.Wrap
+                        }
+                    }
                 }
             }
             ColumnLayout {
@@ -1395,7 +1756,7 @@ Item {
                     horizontalAlignment: Text.AlignHCenter
                     wrapMode: Text.Wrap
                     color: MovieStyle.muted
-                    text: root.setupRequired ? root.catalogState.configError ? root.catalogState.configError + " My library still works." : "Add igdb_client_id and igdb_client_secret to " + (root.catalogState.configPath || "games.json") + ". My library works without catalogue credentials." : root.hideNsfw && root.allTitles.length ? "Games labelled NSFW, or still being classified, are hidden. Enable NSFW in Filters to show them." : root.mode === "library" ? "Install a Steam game, sign in with legendary auth for Epic, or sign into GOG in Heroic, then refresh your libraries." : root.mode === "favorites" ? "Save games with the Favorite button." : "Try another search or change the filters."
+                    text: root.setupRequired ? root.catalogState.configError ? root.catalogState.configError + " My library still works." : "Add igdb_client_id and igdb_client_secret to " + (root.catalogState.configPath || "games.json") + ". My library works without catalogue credentials." : root.hideNsfw && root.allTitles.length ? "Games labelled NSFW, or still being classified, are hidden. Enable NSFW in Filters to show them." : root.mode === "library" ? "Install a Steam or itch.io game, sign in with legendary auth for Epic, or sign into GOG in Heroic, then refresh your libraries." : root.mode === "favorites" ? "Save games with the Favorite button." : "Try another search or change the filters."
                 }
                 MovieButton {
                     Layout.alignment: Qt.AlignHCenter
@@ -1422,7 +1783,7 @@ Item {
             currentIndex: root.titles.findIndex(game => game.id === root.selected.id)
             onCurrentIndexChanged: if (activeFocus && currentIndex >= 0)
                 root.selectGame(root.titles[currentIndex])
-            onContentXChanged: pagination.restart()
+            onContentXChanged: pagination.start()
             ScrollBar.horizontal: MovieScrollBar {}
             WheelScroll {
                 view: rail
@@ -1467,13 +1828,13 @@ Item {
         contentItem: ColumnLayout {
             spacing: 15
             MovieText {
-                text: root.editingStore === "hltb" ? "HowLongToBeat match" : root.editingStore === "steam" ? "Steam match" : root.editingStore === "gog" ? "GOG match" : "Epic match"
+                text: root.editingStore === "hltb" ? "HowLongToBeat match" : root.editingStore === "steam" ? "Steam match" : root.editingStore === "gog" ? "GOG match" : root.editingStore === "itch" ? "itch.io match" : "Epic match"
                 font.bold: true
                 font.pixelSize: 22
             }
             MovieText {
                 Layout.fillWidth: true
-                text: root.editingStore === "hltb" ? "Paste a game link or ID. Leave blank to use automatic matching." : root.editingStore === "gog" ? "Enter the numeric GOG product ID from Heroic. Leave blank to clear the match." : "Enter the Steam AppID or Legendary app name. Leave blank to clear the match."
+                text: root.editingStore === "hltb" ? "Paste a game link or ID. Leave blank to use automatic matching." : root.editingStore === "gog" ? "Enter the numeric GOG product ID from Heroic. Leave blank to clear the match." : root.editingStore === "itch" ? "Enter an itch.io game link or numeric game ID. Leave blank to clear the match." : "Enter the Steam AppID or Legendary app name. Leave blank to clear the match."
                 wrapMode: Text.Wrap
                 color: MovieStyle.muted
             }
@@ -1507,6 +1868,21 @@ Item {
                 }
             }
         }
+    }
+    SettingsDialog {
+        id: globalSettings
+        parent: root
+        state: root.settingsState
+        busy: root.settingsLoading || root.settingsSaving
+        message: root.settingsMessage
+        error: root.settingsError
+        onEdited: changes => root.saveLaunchSettings(changes, "")
+        onActionRequested: (action, store) => root.settingsAction(action, store)
+        onDownloadsRequested: {
+            close();
+            downloads.showJobPanel();
+        }
+        onUrlRequested: url => root.openUrl(url)
     }
     Popup {
         id: uninstall

@@ -581,28 +581,15 @@ Item {
         }
         MovieInput {
             id: search
+            clearable: true
             objectName: "radioSearch"
             visible: root.searchOpen
-            rightPadding: 40
             Layout.preferredWidth: Math.min(300, root.width * 0.25)
             Layout.minimumWidth: 100
             placeholderText: "Search stations…"
             Accessible.name: "Search radio stations"
             onTextChanged: root.scheduleBrowse()
             onAccepted: root.browse(false)
-            MovieIconButton {
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                width: 36
-                height: 36
-                visible: !!search.text
-                iconName: "x"
-                text: "Clear station search"
-                onClicked: {
-                    search.clear();
-                    search.forceActiveFocus();
-                }
-            }
         }
         Item {
             Layout.minimumWidth: 28
@@ -616,6 +603,7 @@ Item {
             }
         }
         MovieIconButton {
+            toolbar: true
             objectName: "radioSearchButton"
             iconName: "search"
             text: "Search stations"
@@ -629,6 +617,7 @@ Item {
             }
         }
         MovieIconButton {
+            toolbar: true
             objectName: "radioFiltersButton"
             iconName: "sliders-horizontal"
             text: "Station filters"
@@ -636,6 +625,7 @@ Item {
             onClicked: root.filtersOpen = !root.filtersOpen
         }
         MovieIconButton {
+            toolbar: true
             objectName: "radioRefresh"
             iconName: "refresh-cw"
             text: "Refresh stations and sync favorites"
@@ -857,9 +847,9 @@ Item {
                         MovieIconButton {
                             objectName: "radioFavorite:" + row.index
                             enabled: !root.favoriteSaving && !root.syncing
-                            highlighted: root.favorite(row.key)
-                            iconName: highlighted ? "star-filled" : "star"
-                            text: highlighted ? "Remove favorite " + row.station.name : "Favorite " + row.station.name
+                            favoriteControl: true
+                            favorite: root.favorite(row.key)
+                            favoriteSubject: row.station?.name || ""
                             onClicked: root.toggleFavorite(row.station)
                         }
                     }

@@ -20,7 +20,8 @@ Documents/Books immediately, without a folder field, like Movies: identified
 files import at once and only unidentified ones open the shared modeless
 `LocalScan` review above the catalogue. A review finishing while Books is hidden
 or outside My Library waits until My Library is shown again; other tabs, hide and
-Escape close it. Transfer activity sits beside Refresh. See the
+Escape close it. The Notifications bell follows the layout control and combines
+provider transfers with the selected book's torrent jobs. See the
 [shared header contract](../movies/ARCHITECTURE.md#presentation-contract).
 
 Open restores one lazy instance. Hide retains selections, search/filter drafts,
@@ -59,8 +60,11 @@ favorites table, never from cached pages or import records.
 `BooksService` uses the current bounded JSON-lines Worker transport and its
 ordered mutation lane. `jobs.py` provides two transfer slots, a bounded queue,
 cancellation, progress and retries; Music and Streaming import it too, so its
-`Jobs`/`progress`/`check_cancelled` contract must stay stable for them. Direct
-downloads validate status, content type, file suffix and length, reject HTML and
+`Jobs`/`progress`/`check_cancelled` contract must stay stable for them. Transfer
+failures and completed jobs use the shared notification panel and desktop
+notifications, including while Books is hidden. Torrent review and hold-to-delete
+remain available in the same panel. Direct downloads validate status, content type,
+file suffix and length, reject HTML and
 existing destinations, and have a 30-minute transfer deadline plus per-read
 socket timeouts. Temporary files are registered for close cleanup; startup
 removes `downloads/tmp*` staging older than the transfer deadline plus ten

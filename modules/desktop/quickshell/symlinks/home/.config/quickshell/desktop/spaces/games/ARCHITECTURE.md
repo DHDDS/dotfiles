@@ -15,7 +15,7 @@ fallback (it may include discontinued ports). HLTB estimates link to their match
 missing/ambiguous matches require manual correction. Account-only Steam data
 such as achievements, cloud-sync state and friends is unavailable.
 
-IGDB and GOG marks come from [Simple Icons](https://github.com/simple-icons/simple-icons);
+IGDB, GOG and itch.io marks come from [Simple Icons](https://github.com/simple-icons/simple-icons);
 store and ProtonDB badges retain their supplied artwork.
 
 ## Provider and worker boundaries
@@ -58,8 +58,10 @@ machine-local snapshots are not part of the portable library backup.
 
 Games reads snapshots when it opens or is shown and after starting an install,
 then every 1.5 seconds while one is running. The Epic button disables during installation and shows percentage;
-inline status adds speed/ETA and retains failures. The Downloads panel lists Epic
-jobs across selections, alongside the current game's torrent jobs. Completion
+inline status adds speed/ETA and retains failures. The shared Notifications panel
+lists Epic jobs across selections, alongside the current game's torrent jobs.
+Observed terminal transitions send desktop notifications; the initial snapshot
+does not replay old outcomes. Completion
 refreshes launcher state and the selected action to Play, deferring visible
 catalogue updates while hidden. Closing Games releases its worker but preserves
 the independent supervisor; reopening recovers progress from disk.
@@ -116,6 +118,123 @@ There is no supported uninstall protocol: the menu opens Heroic for management
 instead of invoking GOGdl directly or deleting files. Existing Steam/Epic actions
 and runner/prefix handling remain unchanged. Refreshing Games rereads the cache;
 new purchases require refreshing Heroic's own library first.
+
+### Launch settings
+
+`SettingsDialog.qml` is a retained lightbox with Performance,
+Steam, Epic, GOG, itch.io and Tools sections. Every section exposes actions or
+editable preferences. Its surfaces and controls use the immersive `MovieStyle`
+palette: the same black background, border and rounded corners as the Spaces
+image gallery and library matching dialog. The dialog fills the Space's content
+area; preference rows switch to stacked controls in narrow layouts. The page remains below the
+host hide control; a dimmed scrim prevents interaction with its background.
+Narrow layouts replace the sidebar with a section picker. Escape dismisses a
+nested picker before the
+lightbox; hiding closes both and returns focus. Library entries expose a Settings
+detail tab. Find is restricted to discovery/favorites entries outside the library;
+becoming a library entry or switching to My Library restores Overview.
+
+The Notifications popup anchors to the Games page independently of the hidden
+Find tab. Its job list scrolls within the available height; hiding Games closes it.
+
+The private SQLite database holds sparse `launch_settings(scope, value)` rows:
+`global` defaults, `STORE:EXTERNAL_ID` per-copy overrides, and `game:UUID` preferred
+store choices. Overlay, position, font-size preset and FPS limit inherit
+independently. Proton selection applies to Epic only. `games.json`'s `proton_path`
+supplies the global runner until explicitly replaced through settings. An empty
+runner selects UMU's automatic default. Overrides follow launcher identities,
+not merged catalogue UUIDs; runner paths remain machine-specific after restore.
+Reset removes overrides and the preferred copy, retaining global preferences,
+prefixes and payloads. Successful Play remembers its store; search/card launches
+try that installed copy first, then another available installed copy.
+
+`launch.py` discovers executable `proton` entry points in Steam libraries/custom
+tools, UMU and Heroic directories, deduplicated by resolved path. Saves and launches
+validate the selected runner. Selecting it never changes or deletes the existing
+Epic prefix. Performance presets generate MangoHud configuration with explicit
+position, font size and FPS limit. Off with a nonzero cap loads MangoHud hidden
+(`no_display`); Off with no cap avoids injecting it on direct launch paths.
+There is no live overlay control or new Gamescope/Mangoapp management.
+
+Epic composes one shell-quoted Legendary `--wrapper` from MangoHud and UMU, with
+`--no-wine` only for UMU. `PROTONPATH` selects the runner; Automatic removes an
+inherited value. Connect Epic opens `legendary auth` in `xdg-terminal-exec`; no
+terminal output, authentication code or session data enters QML. Provider refresh
+actions update just that provider instead of logging into every store.
+
+Steam performance setup requires the client to be stopped. `launcher_setup.py`
+parses localconfig VDF token spans, inserting the stable user-config `launch.py
+steam APPID --` wrapper at `%command%` for the currently known Steam library.
+Existing arguments, environment prefixes, unrelated fields and comments survive
+byte-for-byte. Missing nodes are inserted; duplicate/unsupported structures are
+refused. Atomic publication rechecks the source contents and client state. Setup
+is idempotent and repeats for new library entries. The wrapper reads preferences
+on each launch and execs the original command, optionally through MangoHud.
+Steam remains responsible for Proton selection and compatibility mappings.
+The wrapper bypasses itself when `STEAM_USE_MANGOAPP=1`, preserving the existing
+Gamescope gaming session's performance controls.
+
+Heroic caches game configuration in memory. Initial GOG setup therefore requires
+Heroic to be stopped and preserves the selected native/Flatpak profile. It sets
+`showMangohud`, merging only managed environment keys into each installed GOG
+entry's `GamesConfig/ID.json`, retaining runners, prefixes, cloud-save settings
+and other environment variables. A constant `MANGOHUD_CONFIGFILE` points to
+`GamesConfig/quickshell-performance/ID.conf` inside that profile, readable from
+its Flatpak. `MANGOHUD_CONFIG=read_cfg` loads that file. Later Games launches
+update only its contents, so a running Heroic client uses current preferences
+without reloading its cached configuration. Missing/unconfigured profiles require
+setup before applying performance controls. Flatpak setup checks the MangoHud
+extension against Heroic's actual runtime branch and offers its interactive
+installation in a terminal. These generated performance files are launcher-local
+runtime state; Games regenerates them from its own preferences.
+
+Global Tools opens native or Flatpak ProtonPlus. Per-game settings expose real
+performance overrides, Epic's runner, preferred-copy selection and checked
+installation-folder access, without generic launcher-management shortcuts.
+Launched tools use the same detached UWSM lifetime as games.
+
+### itch.io cached library
+
+`itch.py` reads `$XDG_CONFIG_HOME/itch/db/butler.db` (default
+`~/.config/itch/db/butler.db`) with read-only SQLite connections. `caves` joins
+`games` and `install_locations`; an absolute `custom_install_folder` takes
+precedence. Normal folders require an absolute install location and relative
+folder without parent traversal. Missing folders are omitted, duplicate installs
+collapse to one game, and non-game classifications are excluded. Optional metadata
+columns supply descriptions and covers. WAL updates remain visible.
+
+Cached purchases come from `download_keys.game_id/owner_id`; cached bundle games
+join `bundle_keys` and `bundle_games`. The adapter selects only `id` and `user_id`
+from `profiles`, never `api_key` or any authentication field. Ownership is read
+only for a sole local profile; multiple profiles leave purchases unknown rather
+than mixing accounts. Viewed games are not purchases. Positive cached ownership
+is marked `ownershipCached` with explicit `ownedIds`; absence from a partial cache
+never proves non-ownership. Library union/filters accept positive cached purchases
+while other providers retain their complete-ownership checks. Missing/unsupported
+databases stay unknown. Flatpak itch profiles and website-wide discovery are
+outside this adapter's scope.
+
+Numeric IDs identify records. IGDB/manual URLs match a unique canonical
+creator/game URL; explicit numeric IDs never fall back to title matching. Only
+HTTPS creator subdomains with one game path are accepted, without credentials,
+download keys or query strings. Store metadata fills missing description/artwork
+before optional IGDB enrichment. itch-only games have no supported NSFW labels.
+
+The launcher prefers updater-stable `~/.itch/itch-setup`, then PATH's `itch` or
+`itch-setup`. A bounded `--help` capability check, cached against executable mtime,
+detects `--run-game`. Supported versions launch installed games directly through
+`itch-setup --appname itch --run-game ID`, retaining itch's target selection and
+sandbox behavior while inheriting Games' MangoHud preferences. Older launchers
+use `itch://install?game_id=ID&launch` without promising performance controls.
+Owned uninstalled games use `itch://install?game_id=ID`; Manage opens
+`itch://library/installed`. Actions recheck the current cache and launcher before
+handoff. Games never modifies Butler's DB or invokes downloaded payloads itself.
+
+No extra Games credential or private backup path is required. itch's database,
+account state, payloads and saves remain launcher-owned. The
+`gaming/launchers/itch` module declares AUR's `itch-setup-bin`; opening the installer
+initializes the app. See itch's [protocol contract](https://itch.io/docs/itch/integrating/protocol-urls.html)
+and Butler's [cave model](https://github.com/itchio/butler/blob/master/database/models/cave.go).
 
 ### Native content filtering
 
@@ -196,7 +315,11 @@ owned worker as usual.
 QML keeps raw pages separate from visible rows, patching identities in place.
 The inverse toggle persists as `catalogue/hideNsfw` in `games-ui.ini`. Pagination
 uses the provider's raw offset and waits for classification before advancing
-through wholly hidden pages. Toggle changes refilter, not reload the catalogue.
+through wholly hidden pages. End-of-list checks subtract Qt's mutable content
+origin, accounting for rows inserted/removed by classification. Scroll events
+start the pagination timer without resetting a pending check, so continuous
+motion cannot postpone it indefinitely.
+Toggle changes refilter, not reload the catalogue.
 
 ### Beat times and artwork
 
@@ -269,7 +392,7 @@ corresponding provider. The file reloads on mtime changes. Provider failures are
 sanitized; keys, sessions and response bodies are not logged to QML. Private
 configuration/database files are 0600 and owner directories 0700.
 
-SQLite contains personal favorites, store/HLTB matches, saved metadata, imported
+SQLite contains personal favorites, launch settings, store/HLTB matches, saved metadata, imported
 file records and torrent jobs. Portable backups exclude the large game payloads
 and `prefixes/egs/`, which can contain Wine saves. Those need a separate backup or
 mounts at the same paths. Artwork caches live under

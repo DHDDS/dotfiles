@@ -18,7 +18,7 @@ Item {
         })
     readonly property var uninstallAction: (store.actions || []).find(action => action.type === "uninstall") || ({})
     readonly property var manageAction: (store.actions || []).find(action => action.type === "manage") || ({})
-    readonly property color brandColor: store.store === "steam" ? "#1a9fff" : store.store === "gog" ? "#86328a" : "#111111"
+    readonly property color brandColor: store.store === "steam" ? "#1a9fff" : store.store === "gog" ? "#86328a" : store.store === "itch" ? "#fa5c5c" : "#111111"
     readonly property color actionColor: primary.down || more.down ? Qt.darker(brandColor, 1.15) : groupHover.hovered ? Qt.lighter(brandColor, 1.1) : brandColor
     readonly property string statusText: [store.statusTooltip || "", mainAction.tooltip || ""].filter(Boolean).join("\n")
     property alias popup: options

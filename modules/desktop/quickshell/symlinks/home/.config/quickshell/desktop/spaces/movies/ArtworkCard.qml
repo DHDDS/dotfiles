@@ -10,14 +10,39 @@ MovieButton {
     property string fallbackIcon: ""
     property string subtitle: ""
     property string badge: ""
+    property string leadingBadge: ""
+    property string trailingBadge: ""
     property bool favorite: false
     property int imageFillMode: Image.PreserveAspectCrop
+    property real imageAspectRatio: 0
+    property int imageWidth: 400
+    property bool showFallback: true
+    property bool titleBold: false
+    property int titleHeight: 34
+    property int titlePixelSize: fontSize(13)
+    property int subtitlePixelSize: fontSize(11)
 
     function fontSize(value) {
         return Math.round(value * MovieStyle.fontSize / 14);
     }
 
     padding: 5
+
+    component Badge: Rectangle {
+        property string label: ""
+        visible: !!label
+        width: badgeText.implicitWidth + 16
+        height: 24
+        radius: MovieStyle.controlRadius
+        color: MovieStyle.background
+
+        MovieText {
+            id: badgeText
+            anchors.centerIn: parent
+            text: parent.label
+            font.pixelSize: Math.round(11 * MovieStyle.fontSize / 14)
+        }
+    }
 
     background: Rectangle {
         radius: MovieStyle.controlRadius
@@ -30,8 +55,10 @@ MovieButton {
         spacing: 8
 
         Rectangle {
+            objectName: root.objectName + "ImageFrame"
             Layout.fillWidth: true
-            Layout.fillHeight: true
+            Layout.fillHeight: root.imageAspectRatio <= 0
+            Layout.preferredHeight: root.imageAspectRatio > 0 ? width / root.imageAspectRatio : -1
             color: "#80141117"
             radius: MovieStyle.controlRadius
             clip: true
@@ -43,11 +70,11 @@ MovieButton {
                 anchors.fill: parent
                 source: root.imageSource
                 fillMode: root.imageFillMode
-                imageWidth: 400
+                imageWidth: root.imageWidth
             }
 
             Column {
-                visible: !artwork.hasImage
+                visible: root.showFallback && !artwork.hasImage
                 anchors.centerIn: parent
                 width: parent.width - 18
                 spacing: 10
@@ -71,24 +98,27 @@ MovieButton {
                 }
             }
 
-            Rectangle {
-                visible: !!root.badge
+            Badge {
+                label: root.badge
                 anchors.left: parent.left
                 anchors.bottom: parent.bottom
                 anchors.margins: 8
-                width: badgeText.implicitWidth + 16
-                height: 24
-                radius: MovieStyle.controlRadius
-                color: MovieStyle.background
+            }
 
-                MovieText {
-                    id: badgeText
+            Badge {
+                objectName: root.objectName + "LeadingBadge"
+                label: root.leadingBadge
+                anchors.left: parent.left
+                anchors.top: parent.top
+                anchors.margins: 8
+            }
 
-                    anchors.centerIn: parent
-                    text: root.badge
-                    font.family: MovieStyle.fontFamily
-                    font.pixelSize: fontSize(11)
-                }
+            Badge {
+                objectName: root.objectName + "TrailingBadge"
+                label: root.trailingBadge
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                anchors.margins: 8
             }
 
             Rectangle {
@@ -112,12 +142,14 @@ MovieButton {
 
         MovieText {
             Layout.fillWidth: true
-            Layout.preferredHeight: 34
+            Layout.preferredHeight: root.titleHeight
             text: root.text
             font.family: MovieStyle.fontFamily
-            font.pixelSize: fontSize(13)
+            font.pixelSize: root.titlePixelSize
+            font.bold: root.titleBold
             maximumLineCount: 2
             wrapMode: Text.Wrap
+            elide: Text.ElideRight
             verticalAlignment: Text.AlignTop
         }
 
@@ -128,7 +160,14 @@ MovieButton {
             text: root.subtitle
             color: MovieStyle.muted
             font.family: MovieStyle.fontFamily
-            font.pixelSize: fontSize(11)
+            font.pixelSize: root.subtitlePixelSize
+            elide: Text.ElideRight
+        }
+
+        Item {
+            visible: root.imageAspectRatio > 0
+            Layout.fillHeight: true
+            Layout.preferredHeight: 0
         }
     }
 }

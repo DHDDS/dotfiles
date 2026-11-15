@@ -87,7 +87,7 @@ Item {
         active: root.active
         observeBackgroundJobs: true
         onFailed: message => root.error = message
-        onJobStartFailed: message => root.error = message
+        onJobStartFailed: message => root.reportJobStartFailure(message)
         onJobFinished: job => {
             const notified = root.notifyJob(job, service);
             const failure = job.error || job.result?.error;
@@ -118,7 +118,7 @@ Item {
         startOnDemand: true
         active: root.active
         observeBackgroundJobs: true
-        onJobStartFailed: message => root.error = message
+        onJobStartFailed: message => root.reportJobStartFailure(message)
         onJobFinished: job => {
             const notified = root.notifyJob(job, cacheService);
             if (info.busy && String(job.job_id) === info.jobId)
@@ -143,6 +143,10 @@ Item {
         startOnDemand: true
     }
     property var deliverNotification: (title, body) => Quickshell.execDetached(["notify-send", "--app-name=Music", "--icon=audio-x-generic", "--", title, String(body).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")])
+    function reportJobStartFailure(message) {
+        activity.reportError("Music transfer", message);
+        deliverNotification("Music transfer", message);
+    }
     function visibleJob(job, owner) {
         return (owner.jobRequests[job.job_id]?.args.action || job.result?.action) !== "info";
     }
@@ -167,7 +171,7 @@ Item {
         parent: root
         heading: "Notifications"
         iconName: "bell"
-        notificationTitle: "Music"
+        showEmpty: true
         jobs: service.jobs.filter(job => root.visibleJob(job, service)).concat(cacheService.jobs.filter(job => root.visibleJob(job, cacheService)))
         onCancelRequested: id => {
             if (cacheService.jobs.some(job => job.job_id === id))
@@ -944,6 +948,7 @@ Item {
         visible: root.active
         spacing: 8
         MovieIconButton {
+            toolbar: true
             visible: !!root.entity
             iconName: "arrow-left"
             text: "Back to music"
@@ -1051,6 +1056,7 @@ Item {
         }
         MovieInput {
             id: search
+            clearable: true
             objectName: "musicSearch"
             visible: root.searchOpen
             Layout.preferredWidth: Math.min(280, root.width * 0.23)
@@ -1077,6 +1083,7 @@ Item {
             }
         }
         MovieIconButton {
+            toolbar: true
             objectName: "musicSearchButton"
             iconName: "search"
             text: "Search music"
@@ -1090,6 +1097,7 @@ Item {
             }
         }
         MovieIconButton {
+            toolbar: true
             objectName: "musicFilters"
             visible: !root.entity && root.category !== "artists"
             iconName: "sliders-horizontal"
@@ -1102,6 +1110,7 @@ Item {
             }
         }
         MovieIconButton {
+            toolbar: true
             objectName: "musicRefresh"
             iconName: "refresh-cw"
             text: "Refresh music"
@@ -1109,6 +1118,7 @@ Item {
             onClicked: root.initialized ? root.browse(false, true) : root.initialize()
         }
         MovieIconButton {
+            toolbar: true
             objectName: "musicPendingFilter"
             visible: root.section === "library" && !root.entity
             iconName: "upload"
@@ -1120,6 +1130,7 @@ Item {
             }
         }
         MovieIconButton {
+            toolbar: true
             objectName: "musicNotificationsButton"
             iconName: "bell"
             text: "Notifications"

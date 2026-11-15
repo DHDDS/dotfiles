@@ -1,4 +1,5 @@
 import QtQuick
+import Quickshell
 import "../../ui"
 
 Worker {
@@ -11,6 +12,8 @@ Worker {
     property bool foreground: true
     property string monitorKind: ""
     property var jobs: []
+    property bool jobsLoaded: false
+    property var deliverNotification: (title, body) => Quickshell.execDetached(["notify-send", "--app-name=" + (root.monitorKind === "game" ? "Games" : root.monitorKind === "tv" ? "TV Series" : root.monitorKind === "book" ? "Books" : "Movies"), "--", title, String(body).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")])
     property bool jobsLoading: false
     property string jobsError: ""
     property int pendingDownloads: 0
@@ -40,6 +43,14 @@ Worker {
             jobsError = failure || "";
             if (failure)
                 return;
+            if (jobsLoaded) {
+                for (const job of result) {
+                    const before = jobs.find(item => item.id === job.id);
+                    if (before && before.status !== job.status && ["imported", "review"].includes(job.status))
+                        deliverNotification(job.title || "Download", job.status === "imported" ? "Download complete." : job.message || "Review downloaded files.");
+                }
+            }
+            jobsLoaded = true;
             const previous = jobs.filter(job => job.status === "imported").map(job => job.id);
             jobs = result;
             if (jobs.some(job => job.status === "imported" && !previous.includes(job.id)))

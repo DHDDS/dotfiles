@@ -84,6 +84,70 @@ def pagination_setup(root):
 class StreamingSpaceTests(unittest.TestCase):
     run_qml = support.run_qml
 
+    def test_search_clear_refreshes_and_close_clears_the_query(self):
+        self.run_qml(
+            """import QtQuick
+import QtTest
+import Quickshell
+import "ui"
+ShellRoot {
+ InteractionState{id:interactions}
+ SpaceHost{id:host;interactionState:interactions}
+ TestCase{id:input;parent:host.contentItem;when:false}
+ property int step:0
+ function check(value,message){if(!value)throw Error(message);}
+ function find(item,name){if(item.objectName===name)return item;for(const child of item.children??[]){const found=find(child,name);if(found)return found;}return null;}
+ Timer{interval:100;repeat:true;running:true;onTriggered:{try{
+  if(step===0){SpaceState.open("streaming",Quickshell.screens[0]);step++;return;}
+  const page=host.currentPage;if(!page||!page.initialized||page.loading)return;
+  const field=find(page.toolbarTarget,"streamingSearch");
+  if(step===1){page.searchOpen=true;field.text="fixture";field.accepted();step++;return;}
+  if(step===2){
+   if(page.videos.length!==23)return;
+   const clear=find(field,"streamingSearchClear");check(clear&&clear.visible,"clear button missing");input.mouseClick(clear);
+   check(!field.text&&field.activeFocus,"clear did not retain search focus");step++;return;
+  }
+  if(step===3){
+   if(page.videos.length)return;
+   field.text="fixture";field.accepted();step++;return;
+  }
+  if(step===4){
+   if(page.videos.length!==23)return;
+   const button=find(page.toolbarTarget,"streamingSearchButton");
+   check(!!button,"search toggle missing");button.clicked();
+   check(!page.searchOpen&&!field.text,"closing search retained a hidden query");step++;return;
+  }
+  if(step===5){if(page.videos.length)return;SpaceState.close("streaming");console.log("DISPLAY_PASS");Qt.quit();}
+ }catch(error){console.error("DISPLAY_FAIL",step,String(error));Qt.quit();}}}
+ Timer{interval:10000;running:true;onTriggered:{console.error("DISPLAY_FAIL timeout",step);Qt.quit();}}
+}""",
+            setup=setup,
+        )
+
+    def test_download_start_failure_uses_notifications(self):
+        self.run_qml(
+            """import QtQuick
+import Quickshell
+import "ui"
+ShellRoot {
+ InteractionState{id:interactions}
+ SpaceHost{id:host;interactionState:interactions}
+ property int step:0
+ property int notifications:0
+ function check(value,message){if(!value)throw Error(message);}
+ Timer{interval:100;repeat:true;running:true;onTriggered:{try{
+  if(step===0){SpaceState.open("streaming",Quickshell.screens[0]);step++;return;}
+  const page=host.currentPage;if(!page||!page.initialized||page.loading||page.commandPending)return;
+  const panel=Array.from(page.data).find(item=>item.objectName==="streamingJobsPanel");
+  if(step===1){page.notify=()=>notifications++;page.startJob("download",{videoId:"fixture0001",audio:"invalid"});step++;return;}
+  check(panel.visible&&panel.shownJobs.some(job=>job.error?.includes("Invalid download type"))&&!page.error&&notifications===1,"Streaming start failure did not reach notifications");
+  SpaceState.close("streaming");console.log("DISPLAY_PASS");Qt.quit();
+ }catch(error){console.error("DISPLAY_FAIL",String(error));Qt.quit();}}}
+ Timer{interval:9000;running:true;onTriggered:{console.error("DISPLAY_FAIL timeout",step);Qt.quit();}}
+}""",
+            setup=setup,
+        )
+
     def test_auto_paging_for_rail_grid_and_posts_preserves_scroll_and_stops_when_hidden_or_failed(
         self,
     ):
@@ -187,6 +251,7 @@ ShellRoot {
   if(stage===1){
    check(page.tab==="feed"&&!page.channels.length,"initial feed wrong");
    check(page.toolbarTarget.children.length>0,"toolbar not reparented");
+   check(find(page.toolbarTarget,"streamingLayoutToggle").width===42&&find(page.toolbarTarget,"streamingChannels").width===42&&find(page.toolbarTarget,"streamingJobs").width===42,"Streaming toolbar icon sizes differ");
    page.notify=()=>notifications++;
    page.handleOpen({url:"fixture"});stage++;return;
   }
@@ -236,6 +301,11 @@ ShellRoot {
   if(stage===8){
    check(page===retained&&page.selected.id==="fixture0001","hide destroyed view");
    check(page.detailTab==="summary","analysis did not open the Summary tab");
+   const panel=Array.from(page.data).find(item=>item.objectName==="streamingJobsPanel");
+   if(!panel.visible)input.mouseClick(find(page.toolbarTarget,"streamingJobs"));
+   check(panel.visible&&panel.heading==="Notifications"&&panel.shownJobs.some(job=>job.actionLabel==="Read answer"),"analysis missing from notifications");
+   panel.actionRequested(panel.shownJobs.find(job=>job.actionLabel==="Read answer"));
+   check(!panel.visible&&page.detailTab==="summary","analysis notification did not open its answer");
    check(page.dismissTransient()&&page.detailTab==="overview","detail tab Escape failed");
    page.switchTab("posts");stage++;return;
   }

@@ -403,6 +403,32 @@ class GogTests(unittest.TestCase):
             worker.action(dict(request, actionId='gog:manage'))
         self.assertFalse(worker._spawn_detached.called)
 
+    def test_gog_performance_setup_handles_heroic_caching_and_updates_only_the_profile_file(
+        self,
+    ):
+        self.which = lambda name: (
+            '/bin/' + name if name in ('heroic', 'mangohud') else None
+        )
+        worker = self.make_backend()
+        worker.save_settings({'settings': {'overlay': 'off', 'fpsLimit': 40}})
+        request = dict(gameId=self.game['id'], actionId='gog:play:1234567890')
+        with patch('spaces.games.launcher_setup.running', return_value=True):
+            with self.assertRaisesRegex(ValueError, 'Quit Heroic'):
+                worker.action(request)
+        self.assertFalse(worker._spawn_detached.called)
+        path = self.native / 'GamesConfig/1234567890.json'
+        self.assertFalse(path.exists())
+        with patch('spaces.games.launcher_setup.running', return_value=False):
+            self.assertTrue(worker.action(request)['handoff'])
+        configured = path.read_text()
+        worker.save_settings({'settings': {'fpsLimit': 60}})
+        with patch('spaces.games.launcher_setup.running', return_value=True):
+            self.assertTrue(worker.action(request)['handoff'])
+        self.assertEqual(path.read_text(), configured)
+        profile = self.native / 'GamesConfig/quickshell-performance/1234567890.conf'
+        self.assertIn('fps_limit=60', profile.read_text())
+        self.assertIn('no_display', profile.read_text())
+
 
 if __name__ == '__main__':
     unittest.main()

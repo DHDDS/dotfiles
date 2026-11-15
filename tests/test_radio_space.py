@@ -63,6 +63,7 @@ ShellRoot {
    check(page.rows.length===100,"station catalogue missing: "+page.error);
    const toolbar=find(host.contentItem,"radioToolbar"),hide=find(host.contentItem,"hideSpace");
    check(toolbar.parent===page.toolbarTarget,"toolbar outside shared header");
+   check(find(toolbar,"radioSearchButton").width===42&&find(toolbar,"radioFiltersButton").width===42&&find(toolbar,"radioRefresh").width===42,"Radio toolbar icon sizes differ");
    check(find(toolbar,"radioStationHeading").parent===toolbar&&find(toolbar,"radioStationCount").text==="100","station heading/count not in top toolbar");
    check(Math.abs(toolbar.mapToItem(host.contentItem,0,0).y+toolbar.height/2-hide.mapToItem(host.contentItem,0,0).y-hide.height/2)<1,"controls not at top beside X");
    check(find(host.contentItem,"radioBackground").color.toString()==="#000000","background is not black");

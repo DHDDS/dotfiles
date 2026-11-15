@@ -55,6 +55,7 @@ ShellRoot {
    check(find(host.contentItem,"televisionBackground").color.toString()==="#000000","background is not black");
    const toolbar=find(host.contentItem,"televisionToolbar"),hide=find(host.contentItem,"hideSpace");
    check(toolbar.parent===page.toolbarTarget&&Math.abs(toolbar.mapToItem(host.contentItem,0,0).y+toolbar.height/2-hide.mapToItem(host.contentItem,0,0).y-hide.height/2)<1,"toolbar not in top row");
+   check(find(toolbar,"televisionSearchButton").width===42&&find(toolbar,"televisionFiltersButton").width===42&&find(toolbar,"televisionRefresh").width===42,"Television toolbar icon sizes differ");
    check(find(toolbar,"televisionChannelHeading").parent===toolbar&&find(toolbar,"televisionChannelCount").text==="110","channel heading/count not in top toolbar");
    check(!find(page,"radioNowPlaying")&&!find(page,"televisionNowPlaying"),"Radio playback heading carried over");
    const list=find(page,"televisionChannelList");check(list.height>650&&list.count===100,"list did not use space freed by heading");

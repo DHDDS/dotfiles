@@ -233,6 +233,48 @@ class SpaceSearchTests(unittest.TestCase):
             result['items'][0]['payload']['item'], channel | {'favorite': False}
         )
 
+    def test_local_game_search_includes_current_itch_installs_without_store_login(self):
+        from spaces.games.backend import GamesBackend
+
+        backend = GamesBackend(
+            self.root / 'config/games.json',
+            self.root / 'data/games',
+            env={'HOME': str(self.root), 'PATH': ''},
+        )
+        empty = dict(
+            items=[], ownedIds=[], ownershipKnown=False, installationKnown=False
+        )
+        state = dict(
+            available=True,
+            ownershipKnown=False,
+            installationKnown=True,
+            ownedIds=[],
+            items=[
+                dict(
+                    store='itch',
+                    externalId='123',
+                    title='Indie Example',
+                    installed=True,
+                    launchable=True,
+                )
+            ],
+        )
+        with (
+            patch('spaces.games.backend.GamesBackend', return_value=backend),
+            patch('spaces.games.itch.read', return_value=state) as reader,
+            patch.object(backend, '_steam_state', return_value=empty),
+            patch.object(
+                backend,
+                '_run_legendary_json',
+                side_effect=AssertionError('unexpected login'),
+            ),
+        ):
+            result = search.search(dict(kind='game', query='indie', online=False))
+        reader.assert_called_once()
+        self.assertEqual(result['items'][0]['title'], 'Indie Example')
+        self.assertEqual(result['items'][0]['availability'], 'Local')
+        self.assertTrue(result['items'][0]['playable'])
+
     def test_game_local_search_never_logs_in_to_a_store(self):
         from spaces.games.backend import GamesBackend
 

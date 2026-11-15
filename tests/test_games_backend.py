@@ -551,12 +551,13 @@ class GamesStateTests(unittest.TestCase):
                 'ownedIds': [],
             },
         }
-        steam, epic, gog = games.derive_store_state(game, unavailable)
+        steam, epic, gog, itch = games.derive_store_state(game, unavailable)
         self.assertEqual(steam['installation'], 'unknown')
         self.assertEqual(epic['installation'], 'unknown')
         self.assertEqual(steam['actions'], [])
         self.assertEqual(epic['actions'], [])
         self.assertEqual(gog['actions'], [])
+        self.assertEqual(itch['actions'], [])
 
     def test_steam_can_offer_install_when_the_client_exists_but_library_scan_is_empty(
         self,
@@ -1307,7 +1308,7 @@ class GamesBackendTests(unittest.TestCase):
                 'launch',
                 'Catnip',
                 '--wrapper',
-                'umu-run',
+                '/fake/umu-run',
                 '--no-wine',
             ],
         )
@@ -1502,7 +1503,7 @@ class GamesBackendTests(unittest.TestCase):
         availability = self.backend.availability({'gameId': shared['id']})['stores']
         self.assertEqual(
             [row['primaryAction']['type'] for row in availability],
-            ['play', 'install', 'link'],
+            ['play', 'install', 'link', 'link'],
         )
         installed = self.backend.library_games({'mode': 'installed'})['items']
         self.assertEqual([game['id'] for game in installed], [shared['id']])

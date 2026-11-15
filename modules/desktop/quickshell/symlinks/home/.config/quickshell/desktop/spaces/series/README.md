@@ -3,6 +3,7 @@
 Open **Spaces → TV Series** for discovery, search, favorites, anime, cast,
 trailers, seasons and episodes. It shares Movies’ cinematic appearance and
 supports provider playback, local episodes, subtitles and qBittorrent imports.
+My Library filters use saved title metadata.
 
 Configure `~/.config/quickshell/desktop/spaces/series/media.json` using the
 [media example](../movies/media.example.json); keep it mode 0600 once it holds

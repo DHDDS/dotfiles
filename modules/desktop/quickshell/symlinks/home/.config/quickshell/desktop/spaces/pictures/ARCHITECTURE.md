@@ -18,10 +18,13 @@ for each URL. Detail images decode for their physical display size; there is no
 logical-width heuristic that can leave them on thumbnails. Thumbnails crop to fit. Wallhaven tags/categories/order/period/ratio/minimum-resolution filters,
 Bing markets, metadata, favorites and provider identity are retained.
 
-Escape closes gallery or provider/tag menus, then filters, then clears search,
+Escape closes notifications, gallery or provider/tag menus, then filters, then clears search,
 then closes search, then hides the Space. The top-left host X remains accessible throughout.
 Hiding retains selection, catalogue, filter drafts and ongoing actions; it stops
 pagination, search debounce, tag menus, installation polling and detail rendering.
+A wallpaper action that fails after hiding or changing selection is retained in
+the Notifications panel and announced on the desktop; failures for the visible
+selection remain beside its controls.
 Closing destroys the browser, artwork cache and provider worker, cancels requests
 and kills its owned converter/plugin process groups. Detached Steam/browser
 handoffs survive. Other Spaces remain independent.

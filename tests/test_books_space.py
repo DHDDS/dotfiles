@@ -112,6 +112,7 @@ ShellRoot {
  TestCase {id:input;when:false;parent:host.contentItem}
  property int step:0
  property var retained:null
+ property int notifications:0
  function check(value,message){if(!value)throw new Error(message);}
  function find(item,name){if(item.objectName===name)return item;for(const child of item.children??[]){const found=find(child,name);if(found)return found;}return null;}
  function click(item){input.mouseClick(item,item.width/2,item.height/2);}
@@ -119,6 +120,7 @@ ShellRoot {
   if(root.step===0){SpaceState.open("books",Quickshell.screens[0]);root.step++;return;}
   const page=host.currentPage;if(!page||page.loading||page.detailLoading)return;
   if(root.step===1){
+   page.deliverNotification=()=>notifications++;
    check(page.books.length===1&&page.selected.title==="Fixture book","saved catalogue missing");
    check(page.personal.favorite,"favorite missing");
    check(!find(page,"bookCover"),"overview repeats the catalogue cover");
@@ -129,6 +131,19 @@ ShellRoot {
    check(synopsis.visible&&synopsis.width>300,"synopsis does not share the detail column");
    const toolbar=find(host.contentItem,"booksToolbar");const hide=find(host.contentItem,"hideSpace");
    check(toolbar.parent===page.toolbarTarget&&toolbar.visible,"toolbar missing from common host");
+   const bell=find(host.contentItem,"booksActivityButton"),layout=find(host.contentItem,"layoutButton");
+   check(bell.iconName==="bell"&&bell.text==="Notifications"&&bell.width===layout.width&&bell.width===42,"Books notification button size or label differs");
+   const activity=Array.from(page.data).find(item=>item.objectName==="booksNotifications");
+   const worker=Array.from(page.data).find(item=>item.objectName==="booksService");
+   worker.jobStartFailed("Fixture transfer failed");
+   check(activity.visible&&activity.shownJobs.some(job=>job.error==="Fixture transfer failed")&&!page.findOffersError&&notifications===1,"transfer start failure was not reported as a notification");
+   activity.dismissFinished();activity.close();
+   const findBooks=find(page,"booksFind");
+   findBooks.jobs=[{id:"fixture-torrent",title:"Fixture book",status:"review",active:false,message:"Review files"}];
+   check(activity.shownJobs.some(job=>job.torrentJob?.id==="fixture-torrent"),"torrent missing from Books notifications");
+   activity.actionRequested(activity.shownJobs.find(job=>job.torrentJob));
+   check(page.tab==="torrent"&&findBooks.reviewJobId==="fixture-torrent","torrent review notification did not open Find");
+   findBooks.reviewJobId="";findBooks.jobs=[];page.tab="overview";
    check(Math.abs(toolbar.mapToItem(host.contentItem,0,0).y+toolbar.height/2-hide.mapToItem(host.contentItem,0,0).y-hide.height/2)<1,"toolbar not beside hide");
    const rail=find(page,"catalogueRail");const grid=find(page,"catalogueGrid");
    check(rail.visible&&!grid.visible&&rail.height>200,"rail geometry wrong");
@@ -203,6 +218,7 @@ ShellRoot {
   if(root.step===4){
    const service=Array.from(root.retained.data).find(item=>item.objectName==="booksService");
    if(!service.jobs.some(job=>job.state==="finished"))return;
+   check(notifications===2,"hidden Books completion notification missing or duplicated");
    check(SpaceState.open("books",Quickshell.screens[0])&&host.currentPage===root.retained,"restore recreated Books");
    check(host.currentPage.gridMode,"layout lost on restore");
    SpaceState.open("movies",Quickshell.screens[0]);root.step++;return;
@@ -263,6 +279,7 @@ ShellRoot {
    // Refresh replaces metadata only; the selection's favorite reply still applies.
    if(!page.personal.favorite)return;
    check(page.selected.description==="A saved synopsis"&&!("warning" in page.selected),"refreshed details wrong");
+   check(find(page,"favoriteButton").highlighted&&find(page,"favoriteButton").iconName==="star-filled","Books favorite state is inconsistent");
    check(page.favorites===false&&!page.localMode,"fixture starts outside Browse");
    page.favorites=true;page.browse(false,false);root.step++;return;
   }
@@ -271,6 +288,7 @@ ShellRoot {
    check(subject&&subject.visible,"subject filter missing");
    input.mouseClick(subject,subject.width/2,subject.height/2);
    check(!page.favorites&&!page.localMode&&page.filters.subject==="Computing","subject filter stayed in Favorites");
+   check(!page.filtersOpen&&find(page.toolbarTarget,"filtersButton").highlighted,"active Books filter is not indicated");
    SpaceState.close("books");console.log("DISPLAY_PASS");Qt.quit();
   }
  }catch(error){console.error("DISPLAY_FAIL",error.message+" "+error.stack);Qt.quit();}finally{driver.restart();}}}

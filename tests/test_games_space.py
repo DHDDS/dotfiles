@@ -112,6 +112,60 @@ def setup_install(root):
     )
 
 
+def setup_settings(root):
+    setup(root)
+    steam = root / 'Steam'
+    runner = steam / 'compatibilitytools.d/Fixture-Proton/proton'
+    runner.parent.mkdir(parents=True)
+    runner.write_text('#!/bin/sh\nexit 0\n')
+    runner.chmod(0o700)
+    worker = GamesBackend(
+        root / 'config/quickshell/desktop/spaces/games/games.json',
+        root / 'data/quickshell/desktop/spaces/games',
+    )
+    worker._save_game(
+        'fixture',
+        dict(
+            catalogProvider='fixture',
+            catalogProviderId='fixture',
+            title='Fixture game',
+            libraryEntry=True,
+            storeReferences=[dict(store='epic', externalId='Fixture')],
+        ),
+    )
+    state = dict(
+        epic=dict(
+            available=True,
+            ownershipKnown=True,
+            installationKnown=True,
+            ownedIds=['Fixture'],
+            items=[dict(externalId='Fixture', title='Fixture game', installed=False)],
+        )
+    )
+    path = root / 'spaces/games/backend.py'
+    path.write_text(
+        path.read_text().replace(
+            '    backend = GamesBackend()\n',
+            f"""
+    GamesBackend.libraries = lambda self, *args, **kwargs: {state!r}
+    GamesBackend._steam_libraries = lambda self: ([Path({str(steam)!r})], [])
+    GamesBackend._which = lambda self, name: '/fixture/' + name if name in ('mangohud', 'umu-run') else None
+    GamesBackend._protonplus_command = lambda self: ['/fixture/protonplus']
+    original_settings = GamesBackend.settings
+    def fixture_settings(self, request):
+        self.env['HOME'] = {str(root)!r}
+        return original_settings(self, request)
+    GamesBackend.settings = fixture_settings
+    def fixture_settings_action(self, request):
+        (self.data_root / 'settings-action.json').write_text(json.dumps(request))
+        return dict(started=True, handoff=True)
+    GamesBackend.settings_action = fixture_settings_action
+    backend = GamesBackend()
+""",
+        )
+    )
+
+
 def setup_content(root):
     setup(root)
     worker = GamesBackend(
@@ -215,6 +269,84 @@ def setup_uninstall(root):
 class GamesSpaceTests(unittest.TestCase):
     run_qml = support.run_qml
 
+    def test_header_and_library_settings_save_restore_and_dismiss_in_order(self):
+        self.run_qml(
+            """import QtQuick
+import QtQuick.Controls
+import QtTest
+import Quickshell
+import "ui"
+ShellRoot {
+ id:root
+ InteractionState {id:interactions}
+ SpaceHost {id:host;interactionState:interactions}
+ TestCase {id:input;when:false;parent:host.contentItem}
+ property int step:0
+ function check(value,message){if(!value)throw new Error(message);}
+ function find(item,name){if(item.objectName===name)return item;for(const child of item.children??[]){const found=find(child,name);if(found)return found;}return null;}
+ function popup(page){return Array.from(page.data).find(item=>item.objectName==="gamesSettingsPopup");}
+ function choose(picker,id){const index=picker.model.findIndex(option=>option.id===id);check(index>=0,"option missing: "+id);picker.currentIndex=index;picker.activated(index);}
+ Timer {interval:70;running:true;repeat:true;onTriggered:{try{
+  if(root.step===0){SpaceState.open("games",Quickshell.screens[0]);root.step++;return;}
+  const page=host.currentPage;if(!page||page.busy||page.settingsLoading||page.settingsSaving||page.gameSettingsLoading)return;
+  const global=popup(page);
+  if(root.step===1){
+   check(find(page,"gameSettingsTab").visible,"library Settings tab missing");
+   check(!find(page,"gameFindTab").visible,"My Library still offers Find");
+   input.mouseClick(find(page.toolbarTarget,"gameDownloads"));input.wait(30);
+   const downloads=find(page,"gameFindContent");const panel=Array.from(downloads.data).find(item=>item.objectName==="downloadJobsPanel");
+   check(panel.visible&&panel.parent===page&&panel.width<=430&&panel.height>30&&panel.heading==="Notifications","empty notifications panel is unavailable");
+   host.escapeHandler();check(host.opened&&!panel.visible,"empty Downloads does not dismiss");
+   let delivered=0;downloads.service.deliverNotification=()=>delivered++;const priorDetail=page.detailError;
+   downloads.reportOperationFailure("Game installation","Fixture install failure");
+   check(panel.visible&&panel.shownJobs.some(job=>job.error==="Fixture install failure")&&page.detailError===priorDetail&&delivered===1,"installation failure did not reach notifications");
+   panel.dismissFinished();panel.close();
+   check(find(page.toolbarTarget,"catalogueLayoutToggle").width===42&&find(page.toolbarTarget,"gamesSettingsButton").width===42&&find(page.toolbarTarget,"gameDownloads").width===42,"Games toolbar icon sizes differ");
+   input.mouseClick(find(page.toolbarTarget,"gamesSettingsButton"));root.step++;return;
+  }
+  if(root.step===2){
+   check(global.visible&&global.x===0&&global.y===0&&global.width===page.width&&global.height===page.height,"settings does not fill the Space content area");
+   check(page.settingsState.runners.some(runner=>runner.name==="Fixture-Proton"),"installed runner missing");
+   choose(find(global.contentItem,"defaultOverlayChoice"),"fps");root.step++;return;
+  }
+  if(root.step===3){check(page.settingsState.defaults.overlay==="fps","default not saved");input.mouseClick(find(global.contentItem,"settingsSection:epic"));root.step++;return;}
+  if(root.step===4){
+   const picker=find(global.contentItem,"defaultProtonChoice");choose(picker,picker.model.find(runner=>runner.name==="Fixture-Proton").id);root.step++;return;
+  }
+  if(root.step===5){check(page.settingsState.defaults.proton.endsWith("Fixture-Proton"),"runner default not saved");input.mouseClick(find(global.contentItem,"settingsSection:performance"));root.step++;return;}
+  if(root.step===6){
+   const picker=find(global.contentItem,"defaultOverlayChoice");picker.popup.open();input.wait(20);
+   host.escapeHandler();check(global.visible&&!picker.popup.visible&&host.opened,"picker Escape closed settings");
+   host.escapeHandler();check(!global.visible&&host.opened,"settings Escape hid Games");
+   input.mouseClick(find(page,"gameSettingsTab"));root.step++;return;
+  }
+  if(root.step===7){
+   check(page.gameSettings.length===1&&page.gameSettings[0].settings.overlay==="inherit","game settings missing");
+   choose(find(page,"gameOverlayChoice"),"off");root.step++;return;
+  }
+  if(root.step===8){
+   check(page.gameSettings[0].settings.overlay==="off"&&page.settingsState.defaults.overlay==="fps","override changed default");
+   choose(find(page,"gameFrameLimitChoice"),60);root.step++;return;
+  }
+  if(root.step===9){check(page.gameSettings[0].settings.fpsLimit===60,"game frame cap not saved");input.mouseClick(find(page,"gameResetOverrides"));root.step++;return;}
+  if(root.step===10){check(page.gameSettings[0].settings.overlay==="inherit"&&page.gameSettings[0].settings.fpsLimit==="inherit","reset did not restore inheritance");choose(find(page,"gameOverlayChoice"),"off");root.step++;return;}
+  if(root.step===11){SpaceState.hide();SpaceState.open("games",Quickshell.screens[0]);root.step++;return;}
+  if(root.step===12){check(page.tab==="settings"&&page.gameSettings[0].settings.overlay==="off","settings lost across hide");SpaceState.close("games");SpaceState.open("games",Quickshell.screens[0]);root.step++;return;}
+  if(root.step===13){input.mouseClick(find(page,"gameSettingsTab"));root.step++;return;}
+  if(root.step===14){
+   check(page.gameSettings[0].settings.overlay==="off"&&page.settingsState.defaults.overlay==="fps","settings lost across reopen");
+   input.mouseClick(find(page.toolbarTarget,"gamesSettingsButton"));global.width=520;global.height=650;root.step++;return;
+  }
+  if(root.step===15){const navigation=find(global.contentItem,"gamesSettingsNavigation");check(navigation.visible,"narrow settings has no navigation");choose(navigation,"tools");root.step++;return;}
+  if(root.step===16){input.mouseClick(find(global.contentItem,"gamesProtonPlus"));root.step++;return;}
+  if(root.step===17){check(!host.opened,"tool handoff did not hide Games");SpaceState.close("games");console.log("DISPLAY_PASS");Qt.quit();}
+ }catch(error){console.error("DISPLAY_FAIL",root.step,String(error));Qt.quit();}}}
+ Timer {interval:11000;running:true;onTriggered:{console.error("DISPLAY_FAIL timeout at step",root.step);Qt.quit();}}
+}
+""",
+            setup=setup_settings,
+        )
+
     def test_scrolling_the_library_makes_no_per_game_requests(self):
         def setup_large(root):
             setup(root)
@@ -284,7 +416,10 @@ ShellRoot {
    SpaceState.close("games");console.log("DISPLAY_PASS");Qt.quit();
   }
  }catch(error){console.error("DISPLAY_FAIL",error);Qt.quit();}finally{driver.restart();}}}
- Timer {interval:12000;running:true;onTriggered:{console.error("DISPLAY_FAIL timeout",root.step,host.currentPage?.titles.length,JSON.stringify(root.ops));Qt.quit();}}
+ Timer {interval:12000;running:true;onTriggered:{
+  const page=host.currentPage;const rail=page&&find(page,"gamesRail");
+  console.error("DISPLAY_FAIL timeout",root.step,JSON.stringify({titles:page?.titles.length,next:page?.nextOffset,loading:page?.loading,active:page?.active,contentBusy:page?.contentBusy,queued:page?.contentQueue.length,gridMode:page?.gridMode,railX:rail?.contentX,railOrigin:rail?.originX,railWidth:rail?.width,railContent:rail?.contentWidth,ops:root.ops}));Qt.quit();
+ }}
 }""",
             setup=setup_large,
         )
@@ -336,6 +471,7 @@ ShellRoot {
    check(!find(toolbar,"genrePicker").visible,"catalogue controls shown in library filters");
    input.mouseClick(toggle);
    check(toggle.highlighted&&!page.hideNsfw&&page.titles.length===5,"including NSFW lost hidden games");
+   page.filtersOpen=false;check(filters.highlighted,"active Games filter was not indicated");page.filtersOpen=true;
    page.selectGame(page.titles.find(game=>game.title==='Explicit game'));
    check(page.selected.title==='Explicit game',"explicit selection unavailable with filter off");
    input.mouseClick(toggle);
@@ -486,11 +622,13 @@ ShellRoot {
  SpaceHost {id:host;interactionState:interactions}
  TestCase {id:input;when:false;parent:host.contentItem}
  property int step:0
+ property int notifications:0
  function check(value,message){if(!value)throw new Error(message);}
  function find(item,name){if(item.objectName===name)return item;for(const child of item.children??[]){const found=find(child,name);if(found)return found;}return null;}
  Timer {id:driver;interval:60;running:true;repeat:false;onTriggered:{try{
   if(root.step===0){SpaceState.open("games",Quickshell.screens[0]);root.step++;return;}
   const page=host.currentPage;if(!page)return;
+  page.deliverInstallNotification=()=>notifications++;
   const button=find(page,"gameStoreAction:epic");
   if(root.step===1){
    if(!button||button.text!=="Install"||page.busy)return;
@@ -506,10 +644,12 @@ ShellRoot {
    check(status.visible&&status.text.includes("8.5 MiB/s")&&status.text.includes("ETA 00:00:03"),"speed/ETA missing");
    const activity=find(page.toolbarTarget,"spaceActivityIndicator");
    check(activity.tooltipText.includes("25%"),"install missing from the activity indicator");
-   input.mouseClick(find(page.toolbarTarget,"gameDownloads"));input.wait(40);
    const downloads=find(page,"gameFindContent");
    const panel=Array.from(downloads.data).find(item=>item.objectName==="downloadJobsPanel");
-   check(panel.visible&&downloads.extraJobs.length===1,"Downloads omits Epic install");
+   if(!panel.visible){input.mouseClick(find(page.toolbarTarget,"gameDownloads"));input.wait(40);}
+   check(panel.visible&&panel.shownJobs.some(job=>job.job_id.startsWith("install:")&&job.state==="running"),"Notifications omit Epic install");
+   check(!downloads.visible&&panel.parent===page&&panel.width<=430&&panel.height>90,"Notifications used the hidden Find tab's geometry");
+   check(panel.x>=0&&panel.y>=0&&panel.x+panel.width<=page.width&&panel.y+panel.height<=page.height,"Downloads escapes the Games page");
    host.escapeHandler();check(host.opened&&!panel.visible,"download panel Escape hid Games");
    SpaceState.close("games");SpaceState.open("games",Quickshell.screens[0]);root.step++;return;
   }
@@ -518,6 +658,7 @@ ShellRoot {
    check(page.installJobs[0].progress>=0.25,"reopen lost download telemetry");
    if(page.installJobs[0].state!=="completed"||button.text!=="Play")return;
    check(button.enabled,"completed installation did not enable Play");
+   check(notifications===1,"installation completion was not notified exactly once");
    check(find(page,"gameInstallStatus").text.includes("Installed"),"completion missing");
    SpaceState.close("games");console.log("DISPLAY_PASS");Qt.quit();
   }
@@ -611,6 +752,7 @@ ShellRoot {
    check(gallery.visible&&gallery.currentIndex===0&&gallery.images.length===1,"strip keyboard activation did not open gallery");
    host.escapeHandler();check(host.opened&&!gallery.visible,"gallery Escape hid Games");
    const title=page.selected.id;const pane=find(page,"gameDetailPane");
+   check(!find(page,"gameFindTab").visible,"Find visible in My Library");page.mode="discover";
    click(find(page,"gameFindTab"));input.wait(100);
    check(page.tab==="torrent"&&find(page,"gameFindContent").visible&&!find(page,"gameOverview").visible,"Find is not an inline tab");
    check(pane.visible&&find(page,"gameStore:steam").visible&&beat.visible&&find(page,"gamesRail").visible&&page.selected.id===title,"Find replaced the game detail layout");
@@ -675,10 +817,11 @@ ShellRoot {
    page.filtersOpen=true;const picker=find(page.toolbarTarget,"genrePicker");picker.popup.open();input.wait(30);
    host.escapeHandler();check(host.opened&&!picker.popup.visible&&page.filtersOpen,"picker Escape hid Games");
    host.escapeHandler();check(host.opened&&!page.filtersOpen,"filters Escape hid Games");
-   input.mouseClick(find(page,"gameFindTab"));input.wait(100);host.escapeHandler();
-   check(!host.opened&&page.tab==="torrent","Find tab did not retain selection when hiding");
+   page.selected=Object.assign({},page.selected,{libraryEntry:true});
+   input.mouseClick(find(page,"gameSettingsTab"));input.wait(100);host.escapeHandler();
+   check(!host.opened&&page.tab==="settings","Settings tab did not retain selection when hiding");
    SpaceState.open("games",Quickshell.screens[0]);input.wait(30);
-   check(host.currentPage===page&&page.tab==="torrent","Find tab lost on restore");
+   check(host.currentPage===page&&page.tab==="settings","Settings tab lost on restore");
    page.editMatch("hltb","");input.wait(30);host.escapeHandler();
    check(host.opened,"match Escape hid Games");
    const gallery=Array.from(page.data).find(item=>item.objectName==="gamesGallery");gallery.show([],0,"Fixture");input.wait(30);
@@ -689,7 +832,7 @@ ShellRoot {
   }
   if(root.step===2){check(page.selected.title==="Fixture movie","Games disturbed Movies");SpaceState.open("games",Quickshell.screens[0]);root.step++;return;}
   if(root.step===3){
-   check(page===root.retained&&page.gridMode&&page.tab==="torrent","restore lost instance, layout or Find tab");
+   check(page===root.retained&&page.gridMode&&page.tab==="settings","restore lost instance, layout or Settings tab");
    host.escapeHandler();check(!host.opened,"Escape did not hide");
    drawerWindow.visible=true;input.wait(30);input.mouseClick(find(drawer,"closeSpace:games"));
    check(!host.opened&&!SpaceState.runningIds.includes("games")&&SpaceState.runningIds.includes("movies"),"drawer close affected Movies");

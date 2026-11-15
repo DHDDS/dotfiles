@@ -161,8 +161,8 @@ The shared `ui/space_search.py` helper validates category/query/limits, reads
 existing SQLite/JSON snapshots, then uses the Spaces' provider implementations.
 Movies and Series have separate data/config namespaces. Music uses only the
 current Nextcloud account's merged inventory or catalogue, without starting an
-index rebuild. Game search reads current Steam manifests and saved Epic/GOG
-ownership; it never logs in to a store during the local phase. Television reads
+index rebuild. Game search reads current Steam manifests, itch's cached purchases/installations and
+saved Epic/GOG ownership; it never logs in to a store during the local phase. Television reads
 the saved directory and favorites, leaving full-directory refresh to its Space.
 Online episodes require a show and `S01E02` or `1x2`; plain queries include saved
 episode names and local files. Provider failures retain saved results.

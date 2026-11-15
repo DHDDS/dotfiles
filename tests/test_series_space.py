@@ -193,6 +193,121 @@ def local_setup(root):
 class SeriesSpaceTests(unittest.TestCase):
     run_qml = support.run_qml
 
+    def test_library_filters_apply_saved_metadata_sort_and_reset(self):
+        def setup_library(root):
+            setup(root)
+            backend = series_backend(root)
+            poster = root / 'poster.svg'
+            poster.write_text(
+                '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="30"><rect width="20" height="30" fill="#123456"/></svg>'
+            )
+            rows = [
+                dict(
+                    title='Alpha',
+                    year=2010,
+                    genres=['Drama'],
+                    countries=['United States'],
+                    rating=7,
+                    votes=100,
+                    popularity=3,
+                ),
+                dict(
+                    title='Beta',
+                    year=2024,
+                    genres=['Comedy'],
+                    countries=[dict(iso_3166_1='JP')],
+                    rating=8.5,
+                    votes=700,
+                    popularity=100,
+                ),
+                dict(
+                    title='Gamma',
+                    year=2020,
+                    genres=['Drama'],
+                    countries=['Japan'],
+                    rating=9,
+                    votes=1000,
+                    popularity=20,
+                ),
+                dict(title='Unknown'),
+            ]
+            for index, values in enumerate(rows):
+                identifier = f'tt{201 + index}'
+                show = dict(
+                    values,
+                    id=identifier,
+                    imdbId=identifier,
+                    kind='tv',
+                    poster=poster.as_uri(),
+                )
+                source = root / f'{identifier}.mkv'
+                source.write_bytes(b'fixture')
+                with LocalLibrary(backend.data).db() as db:
+                    db.execute(
+                        'INSERT INTO local_files VALUES (?,?,?,?,?,?)',
+                        ('tv', identifier, 1, 1, str(source), json.dumps(show)),
+                    )
+                backend.save_title(show)
+                backend.put('detail:' + identifier, show)
+                backend.put(
+                    'art:' + identifier, dict(title=show, warnings=[], version=3)
+                )
+                backend.put(
+                    'episodes:' + json.dumps([identifier, None, '']),
+                    dict(seasons=[]),
+                )
+
+        self.run_qml(
+            """import QtQuick
+import QtTest
+import Quickshell
+import "ui"
+ShellRoot {
+ id:root
+ InteractionState{id:interactions}
+ SpaceHost{id:host;interactionState:interactions}
+ TestCase{id:input;when:false;parent:host.contentItem}
+ property int step:0
+ function check(value,message){if(!value)throw new Error(message);}
+ function find(item,name){if(item.objectName===name)return item;for(const child of item.children??[]){const found=find(child,name);if(found)return found;}return null;}
+ function applyFilters(){const toolbar=host.currentPage.toolbarTarget;const row=find(toolbar,"inlineFilters");row.contentX=Math.max(0,row.contentWidth-row.width);input.wait(20);input.mouseClick(find(toolbar,"applyFilters"));}
+ Timer{interval:70;repeat:true;running:true;onTriggered:{try{
+  if(step===0){SpaceState.open("series",Quickshell.screens[0]);step++;return;}
+  const page=host.currentPage;if(!page||!page.initialized||page.loading)return;
+  const toolbar=page.toolbarTarget;
+  if(step===1){
+   check(page.localMode&&page.titles.length===4,"local fixtures missing");
+   const button=find(toolbar,"filtersButton");check(button.enabled,"library filters disabled");input.mouseClick(button);step++;return;
+  }
+  if(step===2){
+   check(find(toolbar,"inlineFilters").visible,"library filters not shown");
+   const genre=find(toolbar,"genrePicker");genre.currentIndex=genre.model.indexOf("Drama");applyFilters();step++;return;
+  }
+  if(step===3){check(page.titles.map(item=>item.title).join() === "Alpha,Gamma","genre did not filter library");page.filtersOpen=false;check(find(toolbar,"filtersButton").highlighted,"active filter is hidden after closing controls");page.filtersOpen=true;input.mouseClick(find(toolbar,"resetFilters"));step++;return;}
+  if(step===4){check(page.titles.length===4,"reset lost library titles");page.filtersOpen=false;check(!find(toolbar,"filtersButton").highlighted,"reset filter remained highlighted");page.filtersOpen=true;find(toolbar,"mediaSortPicker").currentIndex=4;applyFilters();step++;return;}
+  if(step===5){
+   check(page.titles.map(item=>item.title).join()==="Beta,Gamma,Alpha,Unknown","release sorting or missing values wrong");
+   page.filters={country:"JP",minYear:"2020",maxYear:"2023",rating:"9",votes:"900"};page.browse(false);step++;return;
+  }
+  if(step===6){
+   check(page.titles.length===1&&page.titles[0].title==="Gamma","combined cached filters failed");
+   page.filters={country:"US"};page.browse(false);step++;return;
+  }
+  if(step===7){
+   check(page.titles.length===1&&page.titles[0].title==="Alpha","country name did not match country code");
+   page.filters={minYear:"2025"};page.browse(false);step++;return;
+  }
+  if(step===8){
+   check(!page.titles.length&&find(page,"mediaEmptyState").text==="No matching library titles.","no-match state wrong");
+   input.mouseClick(find(toolbar,"resetFilters"));step++;return;
+  }
+  if(step===9){check(page.titles.length===4,"reset did not restore empty result");SpaceState.close("series");console.log("DISPLAY_PASS");Qt.quit();}
+ }catch(error){console.error("DISPLAY_FAIL",step,String(error));Qt.quit();}}}
+ Timer{interval:11000;running:true;onTriggered:{console.error("DISPLAY_FAIL timeout",step);Qt.quit();}}
+}""",
+            setup=setup_library,
+        )
+
     def test_episode_spinner_paints_in_real_toolbar_and_after_restore(self):
         from PySide6.QtGui import QImage
 

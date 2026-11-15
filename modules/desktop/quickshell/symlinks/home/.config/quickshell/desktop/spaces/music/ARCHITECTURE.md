@@ -303,11 +303,11 @@ press seeks once when it ends. Process completion advances the queue while hidde
 File/transfer polling continues while hidden until active jobs finish so
 completion notifications arrive on time.
 Music sends completion/error notifications through `notify-send` to the shell’s
-normal notification server. The Notifications bell retains progress/cancel/retry
+normal notification server. The Notifications bell opens even when empty and retains progress/cancel/retry
 controls, with routine Info reads excluded from both the panel and delivery.
 Page-level status omits outcomes already announced by desktop notifications and
-cancellations; request/job-start and task-specific errors stay with their
-recovery controls.
+cancellations; transfer-start errors appear in Notifications, while task-specific
+errors stay with their recovery controls.
 Generations discard stale play resolutions after Stop. Close cancels owned jobs
 and keeps completed media files.
 

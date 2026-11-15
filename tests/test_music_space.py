@@ -69,6 +69,39 @@ for line in sys.stdin:
 class MusicSpaceTests(unittest.TestCase):
     run_qml = support.run_qml
 
+    def test_transfer_start_failure_uses_notifications(self):
+        self.run_qml(
+            """import QtQuick
+import QtTest
+import Quickshell
+import "ui"
+ShellRoot {
+ InteractionState{id:interactions}
+ SpaceHost{id:host;interactionState:interactions}
+ property int step:0
+ property int notifications:0
+ function check(value,message){if(!value)throw Error(message);}
+ function find(item,name){if(item.objectName===name)return item;for(const child of item.children??[]){const found=find(child,name);if(found)return found;}return null;}
+ Timer{interval:100;repeat:true;running:true;onTriggered:{try{
+  if(step===0){SpaceState.open("music",Quickshell.screens[0]);step++;return;}
+  const page=host.currentPage;if(!page||!page.initialized||page.loading)return;
+  page.deliverNotification=()=>notifications++;
+  const service=Array.from(page.data).find(item=>item.objectName==="musicService");
+  const panel=Array.from(page.data).find(item=>item.objectName==="musicNotifications");
+  const search=find(page.toolbarTarget,"musicSearchButton"),bell=find(page.toolbarTarget,"musicNotificationsButton");
+  check(search.width===42&&bell.width===42&&search.x<bell.x,"Music toolbar controls differ in size or order");
+  check(!panel.hasActivity,"expected an empty notification panel");bell.clicked();
+  check(panel.visible,"empty Music notifications did not open");bell.clicked();check(!panel.visible,"Music notifications did not close");
+  service.jobStartFailed("Fixture transfer failed");
+  check(panel.visible&&panel.shownJobs.some(job=>job.error==="Fixture transfer failed")&&!page.error&&notifications===1,"Music transfer error was not delivered as a notification");
+  panel.dismissFinished();check(!panel.hasActivity,"dismiss did not clear the failure");
+  SpaceState.close("music");console.log("DISPLAY_PASS");Qt.quit();
+ }catch(error){console.error("DISPLAY_FAIL",String(error));Qt.quit();}}}
+ Timer{interval:9000;running:true;onTriggered:{console.error("DISPLAY_FAIL timeout",step);Qt.quit();}}
+}""",
+            setup=setup,
+        )
+
     def test_two_tabs_context_search_infinite_loading_navigation_pickers_and_lifecycle(
         self,
     ):
@@ -286,6 +319,7 @@ ShellRoot {
   if(info.busy||info.reading)return;
   if(root.step===2){
    if(info.loadingTags||!find(info.contentItem,"musicInfoCover").imageReady)return;
+   check(info.width<=820&&info.height<=900&&info.x===(info.parent.width-info.width)/2&&info.y===(info.parent.height-info.height)/2&&info.padding===20&&info.background.radius===12,"Music information is not a centered shared panel");
    check(!info.editing&&!info.dirty&&files.jobs.length===0,"viewing prepared a local file");
    check(preview.reads===1&&preview.lyricReads===0,"lyrics fetched automatically");
    check(preview.fileReads===1&&info.draft.comment==="Existing comment"&&info.draft.lyrics==="Embedded lyrics","Info did not load embedded metadata");

@@ -531,20 +531,21 @@ def local_results(args):
             and Path(saved.get('path') or '/nonexistent').is_file()
         ]
     if kind == 'game':
-        from spaces.games.backend import GamesBackend
+        from spaces.games import itch
+        from spaces.games.backend import GamesBackend, STORE_LABELS
 
         backend = GamesBackend()
         # Legendary's ordinary library refresh can log in to Epic. Local search
-        # uses its saved ownership snapshot, plus current Steam manifests only.
+        # uses saved ownership, current Steam manifests and itch installations.
         snapshot, _fresh = backend._cache_get('libraries:v1', 0, allow_stale=True)
         empty = dict(
             items=[], ownedIds=[], ownershipKnown=False, installationKnown=False
         )
         backend._library_snapshot = {
-            store: (snapshot or {}).get(store, dict(empty))
-            for store in ('steam', 'epic', 'gog')
+            store: (snapshot or {}).get(store, dict(empty)) for store in STORE_LABELS
         }
         backend._library_snapshot['steam'] = backend._steam_state(offline=True)
+        backend._library_snapshot['itch'] = itch.read(backend.env, backend._which)
         backend._library_updated = backend._clock()
         result, offset = [], 0
         # Filter before taking the final shortlist, rather than filtering just

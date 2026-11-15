@@ -41,6 +41,68 @@ def setup(root):
 class MoviesSpaceTests(unittest.TestCase):
     run_qml = support.run_qml
 
+    def test_notifications_keep_torrent_review_and_report_completion_once(self):
+        def notification_setup(root):
+            setup(root)
+            (root / 'spaces/movies/torrent_backend.py').write_text(
+                "import json,sys\n"
+                "job=dict(id='fixture-job',titleId='tt001',kind='movie',title='Fixture movie',"
+                "status='imported',active=False,progress=1,total=100,downloaded=100)\n"
+                "for line in sys.stdin:\n"
+                " r=json.loads(line);print(json.dumps(dict(id=r['id'],error='Fixture queue failure') if r['op']=='queue' else dict(id=r['id'],result=[job] if r['op']=='jobs' else [])),flush=True)\n"
+            )
+
+        self.run_qml(
+            """import QtQuick
+import QtTest
+import Quickshell
+import "ui"
+ShellRoot {
+ InteractionState{id:interactions}
+ SpaceHost{id:host;interactionState:interactions}
+ TestCase{id:input;when:false;parent:host.contentItem}
+ property int step:0
+ property int notifications:0
+ function check(value,message){if(!value)throw Error(message);}
+ function find(item,name){if(item.objectName===name)return item;for(const child of item.children??[]){const found=find(child,name);if(found)return found;}return null;}
+ Timer{interval:100;repeat:true;running:true;onTriggered:{try{
+  if(step===0){SpaceState.open("movies",Quickshell.screens[0]);step++;return;}
+  const page=host.currentPage;if(!page||!page.selected.id||page.busy)return;
+  const service=find(page,"torrentService"), search=find(page,"torrentSearch");
+  const panel=Array.from(search.data).find(item=>item.objectName==="downloadJobsPanel");
+  if(step===1){
+   if(service.jobsLoading||!service.jobsLoaded)return;
+   service.deliverNotification=()=>notifications++;
+   service.jobs=[{id:"fixture-job",titleId:"tt001",kind:"movie",title:"Fixture movie",status:"downloading",active:true,progress:.5,total:100,downloaded:50}];
+   check(panel.shownJobs.length===1&&panel.shownJobs[0].state==="running"&&panel.shownJobs[0].deleteAvailable,"torrent progress missing from notifications");
+   service.refreshJobs();step++;return;
+  }
+  if(step===2){
+   if(service.jobsLoading)return;
+   check(notifications===1&&panel.shownJobs[0].state==="finished","completion notification missing");
+   service.refreshJobs();step++;return;
+  }
+  if(step===3){
+   if(service.jobsLoading)return;
+   check(notifications===1,"completion notification repeated");
+   service.jobs=[{id:"fixture-job",titleId:"tt001",kind:"movie",title:"Fixture movie",status:"review",active:false,progress:1,message:"Choose a file"}];
+   if(!panel.visible)input.mouseClick(find(page.toolbarTarget,"mediaNotificationsButton"));
+   check(panel.visible&&panel.width<=430&&panel.shownJobs[0].actionLabel==="Review files","review action missing");
+   panel.actionRequested(panel.shownJobs[0]);
+   check(!panel.visible&&page.tab==="torrent"&&search.reviewJobId==="fixture-job","review action did not open Find");
+   search.queue({url:"magnet:?xt=fixture"});step++;return;
+  }
+  if(step===4){
+   if(service.pendingDownloads)return;
+   check(notifications===2&&panel.shownJobs.some(job=>job.error==="Fixture queue failure")&&!search.error,"torrent start failure was not reported as a notification");
+   SpaceState.close("movies");console.log("DISPLAY_PASS");Qt.quit();
+  }
+ }catch(error){console.error("DISPLAY_FAIL",String(error));Qt.quit();}}}
+ Timer{interval:9000;running:true;onTriggered:{console.error("DISPLAY_FAIL timeout",step);Qt.quit();}}
+}""",
+            setup=notification_setup,
+        )
+
     def test_catalogue_enter_uses_the_current_watch_choice_once(self):
         def playback_setup(root):
             setup(root)
@@ -324,7 +386,7 @@ ShellRoot {
    root.step++;return;
   }
   if(root.step===3){check(!host.currentPage,"close kept page");check(!find(host.contentItem,"movieToolbar"),"close left a toolbar behind");SpaceState.open("movies",Quickshell.screens[0]);root.step++;return;}
-  if(root.step===4){if(!host.currentPage||host.currentPage.loading)return;if(!host.currentPage.personal.favorite)return;check(host.currentPage!==root.retained,"fresh open reused disposed page");SpaceState.close("movies");console.log("DISPLAY_PASS");Qt.quit();}
+  if(root.step===4){if(!host.currentPage||host.currentPage.loading)return;if(!host.currentPage.personal.favorite)return;check(host.currentPage!==root.retained,"fresh open reused disposed page");const favorite=find(host.currentPage,"mediaFavorite");check(favorite.highlighted&&favorite.iconName==="star-filled"&&favorite.text==="Remove favorite","Movies favorite state is inconsistent");SpaceState.close("movies");console.log("DISPLAY_PASS");Qt.quit();}
  }catch(e){console.error("DISPLAY_FAIL",e);Qt.quit();}finally{driver.start();}} }
  Timer { interval:12000;running:true;onTriggered:{console.error("DISPLAY_FAIL timeout");Qt.quit();} }
 }""",

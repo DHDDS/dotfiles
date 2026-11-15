@@ -10,9 +10,11 @@ Popup {
     property var jobs: []
     property string heading: "Activity"
     property string iconName: activeCount ? "download" : "bell"
-    property string notificationTitle: "Movies"
     property var dismissedJobs: []
-    readonly property var shownJobs: jobs.filter(job => {
+    property var alerts: []
+    property int nextAlertId: 0
+    readonly property var allJobs: jobs.concat(alerts)
+    readonly property var shownJobs: allJobs.filter(job => {
         return !dismissedJobs.includes(String(job.job_id));
     })
     readonly property bool hasFinishedJobs: shownJobs.some(job => {
@@ -22,6 +24,7 @@ Popup {
         return j.state === "running" || j.state === "queued";
     }).length
     property bool retryAvailable: false
+    property bool showEmpty: false
     readonly property bool hasActivity: shownJobs.length > 0 || retryAvailable
     property string retryText: "Retry"
 
@@ -29,26 +32,26 @@ Popup {
     signal actionRequested(var job)
     signal secondaryActionRequested(var job)
     signal cancelRequested(string jobId)
+    signal deleteRequested(var job)
 
     function fontSize(value) {
         return Math.round(value * MovieStyle.fontSize / 14);
     }
 
-    function notify(text, error) {
-        if (!text)
-            return;
-
-        // Status is retained in the activity panel; no detached notifier.
-        showActivity();
-    }
-
-    function showActivity() {
-        if (hasActivity && parent && parent.visible)
+    function showActivity(requireActivity) {
+        if ((hasActivity || (showEmpty && !requireActivity)) && parent && parent.visible)
             open();
     }
 
+    function reportError(title, message) {
+        if (!message)
+            return;
+        alerts = alerts.slice(-31).concat([{ job_id: "alert:" + ++nextAlertId, title: title, state: "failed", error: message }]);
+        showActivity();
+    }
+
     function dismissJob(jobId) {
-        const job = jobs.find(job => {
+        const job = allJobs.find(job => {
             return String(job.job_id) === String(jobId);
         });
         if (!job || ["queued", "running"].includes(job.state))
@@ -106,15 +109,15 @@ Popup {
             close();
         }
     }
-    onJobsChanged: dismissedJobs = dismissedJobs.filter(id => {
-        return jobs.some(job => {
+    onAllJobsChanged: dismissedJobs = dismissedJobs.filter(id => {
+        return allJobs.some(job => {
             return String(job.job_id) === id && !["queued", "running"].includes(job.state);
         });
     })
     onActiveCountChanged: {
         if (activeCount > 0) {
             dismiss.stop();
-            showActivity();
+            showActivity(true);
         } else if (visible) {
             dismiss.restart();
         }
@@ -125,7 +128,7 @@ Popup {
             if (!root.parent.visible)
                 root.close();
             else if (root.activeCount)
-                root.showActivity();
+                root.showActivity(true);
         }
 
         target: root.parent
@@ -191,6 +194,12 @@ Popup {
             onClicked: root.retryRequested()
         }
 
+        MovieText {
+            visible: !root.hasActivity
+            text: "No notifications"
+            color: MovieStyle.muted
+        }
+
         ScrollView {
             Layout.fillWidth: true
             Layout.preferredHeight: Math.min(360, jobColumn.implicitHeight)
@@ -246,12 +255,18 @@ Popup {
                                 implicitHeight: 28
                                 onClicked: root.dismissJob(row.modelData.job_id)
                             }
+
+                            HoldDelete {
+                                visible: !!row.modelData.deleteAvailable
+                                torrent: true
+                                onActivated: root.deleteRequested(row.modelData)
+                            }
                         }
 
                         MovieText {
                             Layout.fillWidth: true
                             text: row.modelData.error || row.modelData.detail || row.modelData.state
-                            elide: Text.ElideMiddle
+                            wrapMode: Text.Wrap
                             color: row.modelData.state === "failed" ? MovieStyle.danger : MovieStyle.muted
                         }
 
@@ -278,7 +293,7 @@ Popup {
                         }
 
                         MovieText {
-                            visible: row.active && (row.modelData.total > 0 || row.modelData.done > 0)
+                            visible: row.active && row.modelData.unit !== "percent" && (row.modelData.total > 0 || row.modelData.done > 0)
                             Layout.fillWidth: true
                             text: (row.modelData.unit === "tracks" ? Number(row.modelData.done || 0).toFixed(1) + " / " + row.modelData.total + " tracks" : root.sizeLabel(row.modelData.done) + (row.modelData.total ? " / " + root.sizeLabel(row.modelData.total) : " transferred") + (row.modelData.speed ? " · " + root.sizeLabel(row.modelData.speed) + "/s" : "")) + (row.modelData.total ? " · " + root.remaining(row.modelData) : "")
                             color: MovieStyle.muted

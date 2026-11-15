@@ -24,6 +24,7 @@ RowLayout {
 
     MovieButton {
         id: primary
+        objectName: root.objectName + "Primary"
 
         text: root.text
         iconName: root.iconName
@@ -58,7 +59,7 @@ RowLayout {
             radius: MovieStyle.controlRadius
             topRightRadius: arrow.visible ? 0 : MovieStyle.controlRadius
             bottomRightRadius: arrow.visible ? 0 : MovieStyle.controlRadius
-            color: primary.down || arrow.down ? Qt.darker(MovieStyle.accent, 1.2) : groupHover.hovered ? Qt.lighter(MovieStyle.accent, 1.1) : MovieStyle.accent
+            color: MovieStyle.primaryColor(primary.down || arrow.down, groupHover.hovered)
             border.color: primary.activeFocus ? MovieStyle.text : "transparent"
             border.width: 2
         }
@@ -121,7 +122,7 @@ RowLayout {
             radius: MovieStyle.controlRadius
             topLeftRadius: 0
             bottomLeftRadius: 0
-            color: primary.down || arrow.down ? Qt.darker(MovieStyle.accent, 1.2) : groupHover.hovered ? Qt.lighter(MovieStyle.accent, 1.1) : MovieStyle.accent
+            color: MovieStyle.primaryColor(primary.down || arrow.down, groupHover.hovered)
             border.color: arrow.activeFocus ? MovieStyle.text : "transparent"
             border.width: 2
         }

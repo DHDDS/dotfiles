@@ -27,7 +27,7 @@ from integrations import private
 from spaces.games import store_metadata
 from spaces.games.igdb import Client as IGDBClient
 from spaces.games.igdb import normalize as normalize_igdb_game
-from spaces.games import content, gog, hltb, presentation
+from spaces.games import content, gog, hltb, itch, launch, launcher_setup, presentation
 from spaces.movies.worker import serve, own_process_group
 from spaces.movies.local import LocalLibrary
 
@@ -52,7 +52,12 @@ UMU_DATABASE = 'https://umu.openwinecomponents.org/umu_api.php'
 PAGE_SIZE = 50
 CACHE_RETENTION = 90 * 86400
 ALLOWED_PROTONDB_TIERS = {'platinum', 'gold', 'silver', 'bronze', 'borked', 'pending'}
-STORE_LABELS = {'steam': 'Steam', 'epic': 'Epic Games Store', 'gog': 'GOG'}
+STORE_LABELS = {
+    'steam': 'Steam',
+    'epic': 'Epic Games Store',
+    'gog': 'GOG',
+    'itch': 'itch.io',
+}
 METADATA_TTL = 7 * 86400
 # An IGDB match for a launcher title rarely changes once found.
 LIBRARY_MATCH_TTL = 30 * 86400
@@ -170,11 +175,14 @@ def match_library_item(game, store, library_items, override='', index=None):
         }
     )
     if override:
+        if store == 'itch' and itch.store_url(override):
+            matches = [item for item in library_items if item.get('slug') == override]
+            return (matches[0], 'override') if len(matches) == 1 else (None, '')
         return (by_id[override], 'override') if override in by_id else (None, '')
     for external_id in references:
         if external_id in by_id:
             return by_id[external_id], 'store-id'
-        if store == 'gog':
+        if store in {'gog', 'itch'}:
             matching = (
                 index['slugs'].get(external_id, [])
                 if index is not None
@@ -192,6 +200,7 @@ def match_library_item(game, store, library_items, override='', index=None):
     if (
         (store == 'steam' and references)
         or (store == 'gog' and any(gog.product_id(value) for value in references))
+        or (store == 'itch' and any(itch.game_id(value) for value in references))
         or game.get('catalogProvider') == 'library'
     ):
         return None, ''
@@ -259,10 +268,12 @@ def derive_store_state(game, libraries, overrides=None, indexes=None):
         )
         identity_ids.update([matched_id] if matched_id else [])
         owned_status = 'unknown'
-        if provider.get('ownershipKnown') and identity_ids:
-            owned_status = (
-                'owned' if identity_ids.intersection(owned_ids) else 'not-owned'
-            )
+        if (
+            provider.get('ownershipKnown') or provider.get('ownershipCached')
+        ) and identity_ids.intersection(owned_ids):
+            owned_status = 'owned'
+        elif provider.get('ownershipKnown') and identity_ids:
+            owned_status = 'not-owned'
         installed = bool(match and match.get('installed'))
         launchable = bool(installed and match.get('launchable'))
         actions = []
@@ -418,21 +429,27 @@ def derive_store_state(game, libraries, overrides=None, indexes=None):
         )
         if provider.get('message'):
             status_tooltip += '\n' + _safe_text(provider['message'], 240)
-        if store == 'gog' and provider.get('available'):
+        if store in {'gog', 'itch'} and provider.get('available'):
             actions = [action for action in actions if action['type'] != 'uninstall']
             actions.append(
                 {
-                    'id': 'gog:manage',
+                    'id': f'{store}:manage',
                     'type': 'manage',
-                    'label': 'Manage in Heroic…',
-                    'store': 'gog',
+                    'label': 'Manage in Heroic…'
+                    if store == 'gog'
+                    else 'Manage in itch…',
+                    'store': store,
                 }
             )
             if primary_action.get('type') in {'play', 'install'}:
-                primary_action['tooltip'] += '\nOpens Heroic' + (
-                    "'s installation prompt."
-                    if primary_action['type'] == 'install'
-                    else ' to launch the game.'
+                primary_action['tooltip'] += (
+                    '\nOpens '
+                    + ('Heroic' if store == 'gog' else 'itch')
+                    + (
+                        "'s installation prompt."
+                        if primary_action['type'] == 'install'
+                        else ' to launch the game.'
+                    )
                 )
 
         rows.append(
@@ -670,6 +687,8 @@ def parse_legendary_installed(raw):
 def _safe_store_url(value, store, external_id):
     if store == 'gog':
         return gog.store_url(value)
+    if store == 'itch':
+        return itch.store_url(value)
     url = _safe_text(value, 1024).strip()
     parsed = urllib.parse.urlsplit(url)
     allowed_hosts = (
@@ -817,6 +836,9 @@ class GamesBackend:
                 );
                 CREATE TABLE IF NOT EXISTS hltb_matches (
                     game_id TEXT PRIMARY KEY, external_id TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS launch_settings (
+                    scope TEXT PRIMARY KEY, value TEXT NOT NULL
                 );
             """)
             # Stale entries are still served offline; drop only long-unused ones.
@@ -1030,11 +1052,13 @@ class GamesBackend:
             external_id = _steam_id(external_id)
         elif store == 'gog':
             external_id = gog.product_id(external_id)
+        elif store == 'itch':
+            external_id = itch.game_id(external_id) or itch.store_url(external_id)
         else:
             external_id = _epic_id(external_id)
         if not external_id:
             raise GamesError(
-                'Enter a valid Steam AppID, Epic app name or numeric GOG product ID.'
+                'Enter a valid Steam AppID, Epic app name, GOG product ID or itch.io game ID/link.'
             )
         with self._db() as db:
             found = db.execute(
@@ -1499,7 +1523,7 @@ class GamesBackend:
             provider = state.get(store, {})
             owned_ids = (
                 set(str(value) for value in provider.get('ownedIds', []))
-                if provider.get('ownershipKnown')
+                if provider.get('ownershipKnown') or provider.get('ownershipCached')
                 else set()
             )
             seen = set()
@@ -1632,17 +1656,18 @@ class GamesBackend:
         )
         if epic:
             fallback = store_metadata.fill_missing(fallback, epic.get('metadata') or {})
-        gog_item, _ = match_library_item(
-            game,
-            'gog',
-            state.get('gog', {}).get('items', []),
-            overrides.get('gog', ''),
-            indexes['gog'],
-        )
-        if gog_item:
-            fallback = store_metadata.fill_missing(
-                fallback, gog_item.get('metadata') or {}
+        for store in ('gog', 'itch'):
+            item, _ = match_library_item(
+                game,
+                store,
+                state.get(store, {}).get('items', []),
+                overrides.get(store, ''),
+                indexes[store],
             )
+            if item:
+                fallback = store_metadata.fill_missing(
+                    fallback, item.get('metadata') or {}
+                )
         app_id = steam_app_id(game, state, overrides.get('steam', ''), indexes['steam'])
         if app_id:
             key = f'steam-metadata:v2:{app_id}'
@@ -2402,6 +2427,7 @@ class GamesBackend:
                 'steam': self._steam_state(),
                 'epic': self._epic_state(refresh=force),
                 'gog': gog.read(self.env, self._which, self._runner),
+                'itch': itch.read(self.env, self._which),
             }
             self._library_snapshot = snapshot
             self._library_updated = self._clock()
@@ -2411,13 +2437,449 @@ class GamesBackend:
     def init(self):
         return {'catalog': self.config_state()}
 
+    def _launch_settings(self, scope='global'):
+        defaults = (
+            {
+                **launch.PERFORMANCE_DEFAULTS,
+                'proton': str(self.config().get('proton_path') or ''),
+            }
+            if scope == 'global'
+            else {key: 'inherit' for key in (*launch.PERFORMANCE_KEYS, 'proton')}
+        )
+        with self._db() as db:
+            row = db.execute(
+                'SELECT value FROM launch_settings WHERE scope=?', (scope,)
+            ).fetchone()
+        if row:
+            defaults.update(json.loads(row['value']))
+        return defaults
+
+    def _effective_launch(self, store, external_id):
+        settings = self._launch_settings()
+        settings.update(
+            {
+                key: value
+                for key, value in self._launch_settings(
+                    f'{store}:{external_id}'
+                ).items()
+                if value != 'inherit'
+            }
+        )
+        return settings
+
+    def _itch_direct(self):
+        command = itch.command(self.env, self._which)
+        try:
+            version = (
+                (command[0], Path(command[0]).stat().st_mtime_ns) if command else None
+            )
+        except OSError:
+            version = None
+        cached = getattr(self, '_itch_direct_cache', None)
+        if cached is None or cached[0] != version:
+            cached = (version, itch.direct_command(self.env, self._which, self._runner))
+            self._itch_direct_cache = cached
+        return cached[1]
+
+    def _heroic_hud(self, state=None):
+        state = state or gog.read(self.env, self._which, self._runner)
+        command = state.get('command', [])
+        if not command:
+            return False, ''
+        if command[0] != self._which('flatpak'):
+            return bool(self._which('mangohud')), ''
+        try:
+            runtime = self._runner(
+                [command[0], 'info', '--show-runtime', gog.APP_ID],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+                env=self.env,
+            )
+            branch = runtime.stdout.strip().rsplit('/', 1)[-1]
+            if not re.fullmatch(r'[0-9]{2}\.[0-9]{2}', branch):
+                return False, ''
+            extension = 'org.freedesktop.Platform.VulkanLayer.MangoHud//' + branch
+            found = self._runner(
+                [command[0], 'info', extension],
+                capture_output=True,
+                timeout=5,
+                check=False,
+                env=self.env,
+            )
+            return found.returncode == 0, extension
+        except (OSError, subprocess.SubprocessError):
+            return False, ''
+
+    def _steam_ready(self, app_id):
+        for root in self._steam_roots():
+            account = presentation.account(self, root)
+            if not account:
+                continue
+            try:
+                text = (account / 'config/localconfig.vdf').read_text()
+                if launcher_setup.steam_ready(
+                    text, app_id, self.config_path.parent / 'launch.py'
+                ):
+                    return True
+            except OSError:
+                continue
+        return False
+
+    def _protonplus_command(self):
+        if executable := self._which('protonplus'):
+            return [executable]
+        if flatpak := self._which('flatpak'):
+            try:
+                result = self._runner(
+                    [flatpak, 'info', 'com.vysp3r.ProtonPlus'],
+                    stdin=subprocess.DEVNULL,
+                    capture_output=True,
+                    timeout=5,
+                    check=False,
+                    env=self.env,
+                )
+                if result.returncode == 0:
+                    return [flatpak, 'run', 'com.vysp3r.ProtonPlus']
+            except (OSError, subprocess.SubprocessError):
+                pass
+        return []
+
+    def settings(self, request):
+        current = self._launch_settings()
+        roots, libraries = self._steam_libraries()
+        heroic = gog.read(self.env, self._which, self._runner)
+        heroic_hud, extension = self._heroic_hud(heroic)
+        return {
+            'defaults': current,
+            'runners': launch.runners(self.env, roots, libraries, current['proton']),
+            'mangohud': bool(self._which('mangohud')),
+            'umu': bool(self._which('umu-run')),
+            'protonplus': bool(self._protonplus_command()),
+            'itch': bool(itch.command(self.env, self._which)),
+            'steam': bool(self._which('steam')),
+            'epic': bool(self._which('legendary')),
+            'terminal': bool(self._which('xdg-terminal-exec')),
+            'heroic': bool(heroic.get('command')),
+            'heroicHud': heroic_hud,
+            'heroicExtension': extension,
+            'itchDirect': bool(self._itch_direct()),
+        }
+
+    def _game_setting_items(self, game_id):
+        _, game = self._catalog_id(game_id)
+        state = self.libraries()
+        overrides = self._store_overrides(game_id)
+        result = []
+        for store in STORE_LABELS:
+            item, _ = match_library_item(
+                game,
+                store,
+                state.get(store, {}).get('items', []),
+                overrides.get(store, ''),
+            )
+            if item:
+                result.append((store, item))
+        return result
+
+    def game_settings(self, request):
+        stores = []
+        for store, item in self._game_setting_items(str(request.get('gameId', ''))):
+            stores.append(
+                {
+                    'store': store,
+                    'label': STORE_LABELS[store],
+                    'externalId': item['externalId'],
+                    'installed': bool(item.get('installed')),
+                    'folder': bool(item.get('installPath') and item.get('installed')),
+                    'settings': self._launch_settings(f'{store}:{item["externalId"]}'),
+                    'performanceReady': self._steam_ready(item['externalId'])
+                    if store == 'steam'
+                    else launcher_setup.heroic_managed(
+                        self._library_state().get('gog', {}).get('configRoot', ''),
+                        item['externalId'],
+                    )
+                    if store == 'gog'
+                    else True,
+                }
+            )
+        return {
+            'stores': stores,
+            'preferredStore': self._preferred_store(str(request.get('gameId', ''))),
+        }
+
+    def _preferred_store(self, game_id):
+        with self._db() as db:
+            row = db.execute(
+                'SELECT value FROM launch_settings WHERE scope=?', ('game:' + game_id,)
+            ).fetchone()
+        return json.loads(row['value']).get('preferredStore', '') if row else ''
+
+    def set_preferred_store(self, request):
+        game_id = str(request.get('gameId', ''))
+        store = request.get('store', '')
+        available = {store for store, _ in self._game_setting_items(game_id)}
+        if store and store not in available:
+            raise GamesError('Choose an available store copy.')
+        self._remember_store(game_id, store)
+        return {'preferredStore': store}
+
+    def _remember_store(self, game_id, store):
+        with self._db() as db:
+            db.execute(
+                'INSERT OR REPLACE INTO launch_settings VALUES(?,?)',
+                ('game:' + game_id, json.dumps({'preferredStore': store})),
+            )
+
+    def reset_game_settings(self, request):
+        game_id = str(request.get('gameId', ''))
+        scopes = [
+            f'{store}:{item["externalId"]}'
+            for store, item in self._game_setting_items(game_id)
+        ]
+        with self._db() as db:
+            db.executemany(
+                'DELETE FROM launch_settings WHERE scope=?',
+                [(scope,) for scope in [*scopes, 'game:' + game_id]],
+            )
+        return self.game_settings(request)
+
+    def save_settings(self, request):
+        scope = 'global'
+        store = request.get('store', 'epic')
+        if request.get('gameId'):
+            item = next(
+                (
+                    item
+                    for store, item in self._game_setting_items(str(request['gameId']))
+                    if store == request.get('store', 'epic')
+                ),
+                None,
+            )
+            if not item:
+                raise GamesError(
+                    'This game has no matching store installation or library entry.'
+                )
+            scope = f'{store}:{item["externalId"]}'
+        changes = request.get('settings')
+        if (
+            not isinstance(changes, dict)
+            or not changes
+            or changes.keys() - {*launch.PERFORMANCE_KEYS, 'proton'}
+        ):
+            raise GamesError('Choose an overlay or Proton setting.')
+        if 'overlay' in changes:
+            allowed = (
+                (*launch.OVERLAYS, 'inherit') if scope != 'global' else launch.OVERLAYS
+            )
+            if changes['overlay'] not in allowed:
+                raise GamesError('Choose a valid overlay setting.')
+            if changes['overlay'] not in {'off', 'inherit'} and not self._which(
+                'mangohud'
+            ):
+                raise GamesError('MangoHud is not installed.')
+        if 'proton' in changes:
+            if scope != 'global' and store != 'epic':
+                raise GamesError('This launcher manages its own Proton selection.')
+            proton = changes['proton']
+            inherited = scope != 'global' and proton == 'inherit'
+            if not inherited and proton != '' and not launch.valid_proton(proton):
+                raise GamesError('Choose an installed Proton runner.')
+            if proton and not inherited and not self._which('umu-run'):
+                raise GamesError('UMU is required to select a Proton runner.')
+        for key, allowed in (
+            ('position', launch.POSITIONS),
+            ('size', tuple(launch.SIZES)),
+        ):
+            if key in changes and changes[key] not in (
+                *allowed,
+                *(('inherit',) if scope != 'global' else ()),
+            ):
+                raise GamesError('Choose a valid performance setting.')
+        if 'fpsLimit' in changes:
+            limit = changes['fpsLimit']
+            if not (scope != 'global' and limit == 'inherit') and (
+                type(limit) is not int or not 0 <= limit <= 1000
+            ):
+                raise GamesError('Choose a frame limit between 0 and 1000 FPS.')
+            if type(limit) is int and limit > 0 and not self._which('mangohud'):
+                raise GamesError('MangoHud is required for frame limiting.')
+        current = self._launch_settings(scope)
+        current.update(changes)
+        with self._db() as db:
+            row = db.execute(
+                'SELECT value FROM launch_settings WHERE scope=?', (scope,)
+            ).fetchone()
+            saved = json.loads(row['value']) if row else {}
+            saved.update(changes)
+            db.execute(
+                'INSERT OR REPLACE INTO launch_settings VALUES(?,?)',
+                (scope, json.dumps(saved)),
+            )
+        return {'settings': current}
+
+    def settings_action(self, request):
+        action = request.get('action')
+        if action == 'protonplus':
+            command = self._protonplus_command()
+        elif action == 'itch':
+            command = itch.command(self.env, self._which)
+        elif action == 'steam':
+            command = [self._which('steam')] if self._which('steam') else []
+        elif action == 'epic_auth':
+            terminal, legendary = (
+                self._which('xdg-terminal-exec'),
+                self._which('legendary'),
+            )
+            command = (
+                [
+                    terminal,
+                    '--title=Connect Epic Games',
+                    '--hold',
+                    '--',
+                    legendary,
+                    'auth',
+                ]
+                if terminal and legendary
+                else []
+            )
+        elif action == 'steam_setup':
+            return self._setup_steam()
+        elif action == 'gog_setup':
+            current = gog.read(self.env, self._which, self._runner)
+            if not self._heroic_hud(current)[0]:
+                raise GamesError('Install MangoHud for Heroic first.')
+            count = 0
+            for item in current.get('items', []):
+                if item.get('installed'):
+                    launcher_setup.heroic_performance(
+                        current['configRoot'],
+                        item['externalId'],
+                        self._effective_launch('gog', item['externalId']),
+                        configure=not launcher_setup.running(
+                            {'heroic', 'Heroic', 'heroic-run'}
+                        ),
+                    )
+                    count += 1
+            return {'message': f'Performance controls enabled for {count} GOG games.'}
+        elif action == 'heroic_mangohud':
+            _, extension = self._heroic_hud()
+            terminal, flatpak = self._which('xdg-terminal-exec'), self._which('flatpak')
+            command = (
+                [
+                    terminal,
+                    '--title=MangoHud for Heroic',
+                    '--hold',
+                    '--',
+                    flatpak,
+                    'install',
+                    'flathub',
+                    extension,
+                ]
+                if terminal and flatpak and extension
+                else []
+            )
+        elif action == 'refresh_store':
+            store = request.get('store')
+            if store not in STORE_LABELS:
+                raise GamesError('Choose a supported store.')
+            with self._library_lock:
+                state = dict(self._library_state())
+                state[store] = (
+                    self._steam_state()
+                    if store == 'steam'
+                    else self._epic_state(refresh=True)
+                    if store == 'epic'
+                    else gog.read(self.env, self._which, self._runner)
+                    if store == 'gog'
+                    else itch.read(self.env, self._which)
+                )
+                self._library_snapshot = state
+                self._library_updated = self._clock()
+                self._cache_put('libraries:v1', state)
+            return {
+                'refreshed': True,
+                'message': f'{STORE_LABELS[store]} library refreshed.',
+            }
+        elif action == 'folder':
+            store = request.get('store')
+            item = next(
+                (
+                    item
+                    for name, item in self._game_setting_items(
+                        str(request.get('gameId', ''))
+                    )
+                    if name == store
+                ),
+                {},
+            )
+            path = Path(item.get('installPath') or '')
+            executable = self._which('xdg-open')
+            if (
+                not item.get('installed')
+                or not path.is_absolute()
+                or not path.is_dir()
+                or not executable
+            ):
+                raise GamesError('The game installation folder is unavailable.')
+            command = [executable, path.as_uri()]
+        elif action == 'gog':
+            command = gog.read(self.env, self._which, self._runner).get('command')
+        else:
+            raise GamesError('Unknown settings action.')
+        if not command:
+            raise GamesError('The requested launcher or tool is not installed.')
+        self._spawn_detached(command, 'The settings tool could not be opened.')
+        return {'started': True, 'handoff': True}
+
+    def _setup_steam(self):
+        if launcher_setup.running({'steam', 'steamwebhelper'}):
+            raise GamesError(
+                'Quit Steam, then enable performance controls. You can reopen Steam afterwards.'
+            )
+        state = self.libraries().get('steam', {})
+        app_ids = sorted(
+            {_steam_id(item.get('externalId')) for item in state.get('items', [])}
+            - {''}
+        )
+        if not app_ids:
+            raise GamesError(
+                'Refresh your Steam library before enabling performance controls.'
+            )
+        for root in self._steam_roots():
+            account = presentation.account(self, root)
+            path = account / 'config/localconfig.vdf' if account else None
+            if not path or not path.is_file():
+                continue
+            if path.stat().st_size > 32 * 1024 * 1024:
+                raise GamesError('Steam settings are too large to edit safely.')
+            original = path.read_text()
+            wrapper = self.config_path.parent / 'launch.py'
+            updated, count = launcher_setup.steam_options(original, app_ids, wrapper)
+            if count:
+                if launcher_setup.running({'steam', 'steamwebhelper'}):
+                    raise GamesError(
+                        'Steam started during setup. Quit it and try again.'
+                    )
+                launcher_setup.atomic_write(path, updated, original)
+            return {
+                'message': f'Performance controls enabled for {len(app_ids)} Steam games.'
+            }
+        raise GamesError(
+            'Sign into Steam once before configuring performance controls.'
+        )
+
     def availability(self, request):
         game_id = str(request.get('gameId', ''))
         _, game = self._catalog_id(game_id)
         # Refresh game rescans launchers unless they were read moments ago.
         state = self.libraries(max_age=5 if request.get('refresh') else 60)
         overrides = self._store_overrides(game_id)
-        return {'stores': derive_store_state(game, state, overrides)}
+        return {
+            'stores': derive_store_state(game, state, overrides),
+            'preferredStore': self._preferred_store(game_id),
+        }
 
     def presentation(self, request):
         _, game = self._catalog_id(request.get('gameId', ''))
@@ -2526,7 +2988,9 @@ class GamesBackend:
             )
         args = [executable, 'launch', app_name]
         env = dict(self.env)
-        if self._which('umu-run'):
+        umu = bool(self._which('umu-run'))
+        preferences = self._effective_launch('epic', app_name)
+        if umu:
             steam_references = [
                 ref.get('externalId', '')
                 for ref in (game.get('storeReferences') or [])
@@ -2547,10 +3011,21 @@ class GamesBackend:
             env['GAMEID'] = game_id_for_umu
             env['STORE'] = 'egs'
             env['WINEPREFIX'] = str(prefix_root)
-            proton_path = _safe_text(self.config().get('proton_path', '')).strip()
-            if proton_path and Path(proton_path).is_dir():
-                env['PROTONPATH'] = proton_path
-            args.extend(['--wrapper', 'umu-run', '--no-wine'])
+        try:
+            wrapper = launch.epic_wrapper(
+                env,
+                self._which,
+                preferences['overlay'],
+                preferences['proton'],
+                umu,
+                preferences,
+            )
+        except ValueError as error:
+            raise GamesError(str(error)) from None
+        if wrapper:
+            args.extend(['--wrapper', wrapper])
+            if umu:
+                args.append('--no-wine')
         self._spawn_detached(
             args, 'The Epic launcher could not start this game.', env=env
         )
@@ -2686,6 +3161,58 @@ class GamesBackend:
         kind, store = action['type'], action['store']
         external_id = action_id.rsplit(':', 1)[-1]
         state = self.libraries()[store]
+        if store == 'itch':
+            current = itch.read(self.env, self._which)
+            command = current.get('command')
+            if not command:
+                raise GamesError('The itch desktop app is not installed.')
+            if kind == 'manage':
+                url = 'itch://library/installed'
+            elif kind == 'install':
+                identifier = itch.game_id(external_id)
+                if identifier not in current['ownedIds'] or any(
+                    item['externalId'] == identifier and item['installed']
+                    for item in current['items']
+                ):
+                    raise GamesError(
+                        'Refresh your itch library before installing this game.'
+                    )
+                url = f'itch://install?game_id={identifier}'
+            else:
+                identifier = itch.game_id(external_id)
+                item = next(
+                    (
+                        item
+                        for item in current['items']
+                        if item['externalId'] == identifier and item['launchable']
+                    ),
+                    None,
+                )
+                if kind != 'play' or not item:
+                    raise GamesError(
+                        'itch no longer reports this game as installed. Refresh Games.'
+                    )
+                preferences = self._effective_launch('itch', identifier)
+                direct = self._itch_direct()
+                if direct:
+                    env = dict(self.env)
+                    args = [*direct, identifier]
+                    if launch.performance_environment(env, preferences):
+                        mangohud = self._which('mangohud')
+                        if not mangohud:
+                            raise GamesError('MangoHud is not installed.')
+                        args.insert(0, mangohud)
+                    self._spawn_detached(
+                        args, 'itch could not launch this game.', env=env
+                    )
+                    return {'started': True, 'message': 'itch launch started.'}
+                if preferences['overlay'] != 'off' or preferences['fpsLimit']:
+                    raise GamesError(
+                        'Update itch to a version with direct game launches to use performance controls.'
+                    )
+                url = f'itch://install?game_id={identifier}&launch'
+            self._spawn_detached([*command, url], 'itch could not be opened.')
+            return {'started': True, 'handoff': True, 'message': 'Opened itch.'}
         if store == 'gog':
             current = gog.read(self.env, self._which, self._runner)
             command = current.get('command')
@@ -2709,6 +3236,33 @@ class GamesBackend:
                     raise GamesError(
                         'Heroic no longer reports this GOG game as installed and launchable.'
                     )
+                if kind == 'play':
+                    preferences = self._effective_launch('gog', identifier)
+                    root = current.get('configRoot')
+                    if root and (
+                        preferences['overlay'] != 'off'
+                        or preferences['fpsLimit']
+                        or launcher_setup.heroic_managed(root, identifier)
+                        or any(
+                            value != 'inherit'
+                            for key, value in self._launch_settings(
+                                'gog:' + identifier
+                            ).items()
+                            if key in launch.PERFORMANCE_KEYS
+                        )
+                    ):
+                        if not self._heroic_hud(current)[0]:
+                            raise GamesError(
+                                'Install MangoHud for Heroic from Games settings → GOG before using performance controls.'
+                            )
+                        launcher_setup.heroic_performance(
+                            root,
+                            identifier,
+                            preferences,
+                            configure=not launcher_setup.running(
+                                {'heroic', 'Heroic', 'heroic-run'}
+                            ),
+                        )
                 if kind == 'install' and (
                     not current.get('ownershipKnown')
                     or identifier not in current.get('ownedIds', [])
@@ -2744,6 +3298,13 @@ class GamesBackend:
                 if not installation or not installation.get('launchable'):
                     raise GamesError(
                         'Steam no longer reports this game as installed and launchable.'
+                    )
+                preferences = self._effective_launch('steam', app_id)
+                if (
+                    preferences['overlay'] != 'off' or preferences['fpsLimit']
+                ) and not self._steam_ready(app_id):
+                    raise GamesError(
+                        'Enable performance controls in Games settings → Steam before launching with an overlay or frame limit.'
                     )
                 self._spawn_detached(
                     [executable, '-applaunch', app_id],
@@ -2791,6 +3352,18 @@ class GamesBackend:
 
     def handle(self, request):
         op = request.get('op')
+        if op == 'settings':
+            return self.settings(request)
+        if op == 'game_settings':
+            return self.game_settings(request)
+        if op == 'save_settings':
+            return self.save_settings(request)
+        if op == 'settings_action':
+            return self.settings_action(request)
+        if op == 'set_preferred_store':
+            return self.set_preferred_store(request)
+        if op == 'reset_game_settings':
+            return self.reset_game_settings(request)
         if op == 'install_jobs':
             return self.install_jobs(request)
         if op == 'content_rating':
@@ -2847,6 +3420,11 @@ class GamesBackend:
             }
         if op == 'action':
             result = self.action(request)
+            if ':play:' in str(request.get('actionId', '')) and result.get('started'):
+                self._remember_store(
+                    str(request.get('gameId', '')),
+                    str(request['actionId']).split(':', 1)[0],
+                )
             if ':play:' not in str(request.get('actionId', '')):
                 # Launchers change installations after the handoff; the next
                 # availability read (Refresh game, Play) rescans them.
@@ -2877,8 +3455,18 @@ def main():
             'protondb',
             'presentation',
             'howlongtobeat',
+            'game_settings',
         ),
-        controls=('set_favorite', 'set_match', 'set_hltb_match', 'action'),
+        controls=(
+            'set_favorite',
+            'set_match',
+            'set_hltb_match',
+            'action',
+            'save_settings',
+            'settings_action',
+            'set_preferred_store',
+            'reset_game_settings',
+        ),
     )
 
 

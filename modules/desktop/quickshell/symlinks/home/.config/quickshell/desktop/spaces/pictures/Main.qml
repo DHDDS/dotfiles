@@ -59,6 +59,7 @@ Item {
         }
     ]
     property string error: ""
+    property var deliverNotification: (title, body) => Quickshell.execDetached(["notify-send", "--app-name=Pictures", "--", title, String(body).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")])
     // Ordered mutations can queue behind an Apply; never report them failed early.
     readonly property int controlTimeout: WallpaperService.applyTimeout
     property string actionMessage: ""
@@ -114,6 +115,14 @@ Item {
         spaceId: "pictures"
         serviceName: "Pictures"
         onFailed: message => root.error = message
+    }
+    OperationCenter {
+        id: activity
+        objectName: "picturesNotifications"
+        parent: root
+        heading: "Notifications"
+        iconName: "bell"
+        showEmpty: true
     }
     ArtworkCache {
         id: picturesCache
@@ -383,12 +392,17 @@ Item {
     // Results of an action on a wallpaper that is no longer selected: success is
     // dropped, but a failure must not vanish or read as the new selection's.
     function reportFor(key, item, message, failure) {
-        if (key === wallpaperKey(selected)) {
+        if (failure && (!active || key !== wallpaperKey(selected))) {
+            const title = wallpaperName(item);
+            if (key === wallpaperKey(selected)) {
+                actionMessage = "";
+                actionFailed = false;
+            }
+            activity.reportError(title, failure);
+            deliverNotification(title, failure);
+        } else if (key === wallpaperKey(selected)) {
             actionMessage = failure || message;
             actionFailed = !!failure;
-        } else if (failure) {
-            actionMessage = wallpaperName(item) + ": " + failure;
-            actionFailed = true;
         }
     }
     function setDesktopWallpaper() {
@@ -479,6 +493,10 @@ Item {
     }
 
     function dismissTransient() {
+        if (activity.visible) {
+            activity.close();
+            return true;
+        }
         if (gallery.visible) {
             gallery.close();
             return true;
@@ -520,6 +538,7 @@ Item {
     onProviderFiltersChanged: savePreferences()
     onActiveChanged: {
         if (!active) {
+            activity.close();
             pagination.stop();
             searchDelay.stop();
             gallery.close();
@@ -718,10 +737,10 @@ Item {
         }
         MovieInput {
             id: search
+            clearable: true
             objectName: "picturesSearch"
             visible: root.searchOpen
             Layout.preferredWidth: Math.min(320, root.width * 0.30)
-            rightPadding: 42
             placeholderText: root.favoritesView ? qsTr("Search favorites…") : qsTr("Search %1…").arg(root.providerName(root.providerId))
             onTextChanged: {
                 root.query = text;
@@ -731,19 +750,6 @@ Item {
             onAccepted: {
                 searchDelay.stop();
                 root.browse(false);
-            }
-            MovieIconButton {
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                width: 36
-                height: 36
-                visible: search.text.length > 0
-                iconName: "x"
-                text: qsTr("Clear search")
-                onClicked: {
-                    search.clear();
-                    search.forceActiveFocus();
-                }
             }
         }
         MovieChoice {
@@ -766,6 +772,7 @@ Item {
             }
         }
         MovieIconButton {
+            toolbar: true
             objectName: "picturesSearchButton"
             iconName: "search"
             text: qsTr("Search wallpapers")
@@ -779,17 +786,30 @@ Item {
             }
         }
         MovieIconButton {
+            toolbar: true
             objectName: "picturesFiltersButton"
             iconName: "sliders-horizontal"
             text: qsTr("Filters")
             enabled: !root.favoritesView
-            highlighted: root.filtersOpen
+            highlighted: root.filtersOpen || (!root.favoritesView && root.providerCatalogReady && MovieStyle.filtersActive(root.filters, root.providerDescriptor(root.providerId)?.defaultFilters))
             onClicked: {
                 root.filtersOpen = !root.filtersOpen;
                 root.syncFilterControls();
             }
         }
         MovieIconButton {
+            toolbar: true
+            iconName: "refresh-cw"
+            text: qsTr("Refresh wallpapers")
+            enabled: !root.loading
+            onClicked: {
+                root.loadProviders(false);
+                root.loadFavoriteIds();
+                root.browse(false);
+            }
+        }
+        MovieIconButton {
+            toolbar: true
             objectName: "wallpaperViewButton"
             iconName: root.gridMode ? "panels-top-left" : "layout-grid"
             text: root.gridMode ? qsTr("Show wallpaper rail") : qsTr("Show grid")
@@ -799,6 +819,7 @@ Item {
             }
         }
         MovieIconButton {
+            toolbar: true
             objectName: "randomWallpaperButton"
             iconName: "shuffle"
             text: qsTr("Select a random wallpaper")
@@ -807,14 +828,11 @@ Item {
             onClicked: root.chooseRandom()
         }
         MovieIconButton {
-            iconName: "refresh-cw"
-            text: qsTr("Refresh wallpapers")
-            enabled: !root.loading
-            onClicked: {
-                root.loadProviders(false);
-                root.loadFavoriteIds();
-                root.browse(false);
-            }
+            toolbar: true
+            objectName: "picturesNotificationsButton"
+            iconName: "bell"
+            text: "Notifications"
+            onClicked: activity.visible ? activity.close() : activity.showActivity()
         }
     }
     ColumnLayout {
@@ -922,7 +940,7 @@ Item {
                         objectName: "setWallpaperButton"
                         iconName: "monitor"
                         text: root.settingWallpaper ? qsTr("Applying…") : qsTr("Set wallpaper & lock screen")
-                        idleColor: MovieStyle.accent
+                        primary: true
                         enabled: !root.settingWallpaper
                         onClicked: root.setDesktopWallpaper()
                     }
@@ -939,8 +957,8 @@ Item {
                     }
                     MovieIconButton {
                         objectName: "favoriteWallpaperButton"
-                        iconName: root.isFavorite(root.selected) ? "star-filled" : "star"
-                        text: root.isFavorite(root.selected) ? qsTr("Remove favorite") : qsTr("Add favorite")
+                        favoriteControl: true
+                        favorite: root.isFavorite(root.selected)
                         enabled: !root.favoriteSaving
                         onClicked: root.toggleFavorite()
                     }

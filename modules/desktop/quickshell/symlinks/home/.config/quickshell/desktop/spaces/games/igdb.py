@@ -10,7 +10,7 @@ import time
 import urllib.parse
 from datetime import UTC, datetime
 
-from spaces.games import gog
+from spaces.games import gog, itch
 
 BROWSE_FIELDS = 'name,summary,cover.image_id,screenshots.image_id,artworks.image_id,genres.name,platforms.name,first_release_date,total_rating,total_rating_count,websites.url,websites.type'
 DETAIL_FIELDS = (
@@ -119,6 +119,8 @@ def normalize(raw, game_id=''):
                         'url': gog.store_url(site['url']),
                     }
                 )
+            if url := itch.store_url(site.get('url')):
+                references.append({'store': 'itch', 'externalId': url, 'url': url})
     release = (
         datetime.fromtimestamp(raw['first_release_date'], UTC).strftime('%Y-%m-%d')
         if raw.get('first_release_date')

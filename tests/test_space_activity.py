@@ -12,6 +12,71 @@ import support
 class SpaceActivityTests(unittest.TestCase):
     run_qml = support.run_qml
 
+    def test_shared_card_and_panel_variants(self):
+        self.run_qml("""import QtQuick
+import QtTest
+import Quickshell
+import "spaces/movies"
+import "spaces/streaming" as Streaming
+FloatingWindow {
+ id:root
+ implicitWidth:1000;implicitHeight:700
+ ArtworkCard {id:poster;x:20;y:20;width:180;height:300;text:"Poster";highlighted:true}
+ Streaming.VideoCard {id:video;objectName:"fixtureVideo";x:250;y:20;width:320;height:260;selected:true;video:({title:"Fixture video",creator:"Creator",duration:125,localPath:"/fixture"})}
+ MovieStyle.Panel {id:full;parent:root.contentItem;fullArea:true}
+ MovieStyle.Panel {id:centered;parent:root.contentItem;maximumPanelWidth:600;maximumPanelHeight:400}
+ TestCase {id:input;parent:root.contentItem;when:false}
+ function check(value,message){if(!value)throw Error(message);}
+ function find(item,name){if(item.objectName===name)return item;for(const child of item.children??[]){const found=find(child,name);if(found)return found;}return null;}
+ Timer{interval:100;running:true;onTriggered:{try{
+  const frame=find(video,"fixtureVideoImageFrame"),leading=find(video,"fixtureVideoLeadingBadge"),trailing=find(video,"fixtureVideoTrailingBadge");
+  check(frame&&Math.abs(frame.width/frame.height-16/9)<.02,"video thumbnail is not widescreen");
+  check(video.text==="Fixture video"&&video.subtitle==="Creator"&&leading.visible&&leading.label==="OFFLINE"&&trailing.visible&&trailing.label==="2:05","video metadata or badges were lost");
+  video.video={title:"Live video",creator:"Creator",live:true,availability:"needs_auth"};
+  check(leading.label==="SIGN-IN"&&trailing.label==="LIVE","live or sign-in badges were lost");
+  video.video={title:"Audio",creator:"Creator",localPath:"/fixture",audio:true};check(leading.label==="AUDIO","audio badge was lost");
+  check(video.background.radius===poster.background.radius&&video.background.color===poster.background.color&&video.background.border.width===poster.background.border.width,"video selection differs from artwork cards");
+  video.selected=false;input.mouseMove(video,10,10);input.wait(30);check(video.hovered&&video.background.color===MovieStyle.accentSurface,"video hover differs from artwork cards");
+  check(full.width===root.contentItem.width&&full.height===root.contentItem.height&&full.x===0&&full.y===0,"full panel does not fill its content area");
+  centered.open();input.wait(20);
+  check(centered.width===600&&centered.height===400&&centered.x===(root.contentItem.width-600)/2&&centered.y===(root.contentItem.height-400)/2,"centered panel geometry is wrong: "+[centered.width,centered.height,centered.x,centered.y,root.contentItem.width,root.contentItem.height]);
+  check(full.padding===20&&centered.padding===20&&full.background.color===centered.background.color&&full.background.radius===centered.background.radius&&full.background.border.color===centered.background.border.color,"panel surfaces differ");
+  centered.maximumPanelWidth=2000;centered.maximumPanelHeight=2000;input.wait(20);
+  check(centered.width===root.contentItem.width-40&&centered.height===root.contentItem.height-40&&centered.x===20&&centered.y===20,"centered panel does not respect the edge inset");
+  console.log("DISPLAY_PASS");Qt.quit();
+ }catch(error){console.error("DISPLAY_FAIL",String(error));Qt.quit();}}}
+ Timer{interval:5000;running:true;onTriggered:{console.error("DISPLAY_FAIL timeout");Qt.quit();}}
+}""")
+
+    def test_shared_search_favorite_and_primary_controls(self):
+        self.run_qml("""import QtQuick
+import QtTest
+import Quickshell
+import "spaces/movies"
+FloatingWindow {
+ id:root
+ implicitWidth:600;implicitHeight:220
+ property int clearedCount:0
+ MovieInput {id:search;objectName:"search";x:20;y:20;width:240;clearable:true;onCleared:clearedCount++}
+ MovieIconButton {id:favorite;x:20;y:90;favoriteControl:true;onClicked:favorite.favorite=!favorite.favorite}
+ MovieButton {id:primary;x:100;y:90;text:"Watch";primary:true}
+ SplitButton {id:split;objectName:"split";x:250;y:90;text:"Watch"}
+ TestCase {id:input;parent:root.contentItem;when:false}
+ function check(value,message){if(!value)throw Error(message);}
+ function find(item,name){if(item.objectName===name)return item;for(const child of item.children??[]){const found=find(child,name);if(found)return found;}return null;}
+ Timer{interval:100;running:true;onTriggered:{try{
+  search.text="query";const clear=find(search,"searchClear");check(clear&&clear.visible,"search clear control missing");
+  input.mouseClick(clear);check(!search.text&&clearedCount===1&&search.activeFocus,"search clear did not retain focus");
+  check(!favorite.highlighted&&favorite.iconName==="star"&&favorite.text==="Add favorite","empty favorite state is wrong");
+  input.mouseClick(favorite);check(favorite.highlighted&&favorite.iconName==="star-filled"&&favorite.text==="Remove favorite","selected favorite state is wrong");
+  input.mouseMove(primary);input.wait(180);check(primary.hovered&&primary.background.color==MovieStyle.primaryColor(false,true),"primary hover style differs");const hoverColor=String(primary.background.color);
+  const splitPrimary=find(split,"splitPrimary");input.mouseMove(splitPrimary);input.wait(180);
+  check(String(splitPrimary.background.color)===hoverColor,"single and split primary hover colors differ");
+  console.log("DISPLAY_PASS");Qt.quit();
+ }catch(error){console.error("DISPLAY_FAIL",String(error));Qt.quit();}}}
+ Timer{interval:5000;running:true;onTriggered:{console.error("DISPLAY_FAIL timeout");Qt.quit();}}
+}""")
+
     def test_concurrent_progress_and_no_idle_or_hidden_history(self):
         self.run_qml("""import QtQuick
 import QtQuick.Controls

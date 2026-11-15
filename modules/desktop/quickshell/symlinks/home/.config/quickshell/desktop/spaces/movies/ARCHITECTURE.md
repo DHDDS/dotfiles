@@ -17,7 +17,20 @@ The host owns the edge-to-edge backdrop and single toolbar: pages provide
 `backdropTarget` / `toolbarTarget`, bind toolbar visibility to activation and keep
 the host's hide control reachable over popups. Do not add in-page Spaces links.
 
-Catalogue tabs and toolbar actions share ordering across Spaces. Refresh retains
+Catalogue tabs and toolbar actions share ordering across Spaces. Right-side icon
+buttons use the toolbar variant of `MovieIconButton` (42 logical pixels wide) and generally put
+search, filters, refresh, layout, settings and notifications in that order.
+Toolbar search uses the clearable `MovieInput`: its clear action retains focus,
+closing search clears the query, and Escape clears before closing. Filter buttons
+remain highlighted while non-default filters apply. The favorite variant of
+`MovieIconButton` owns the filled-star and selected treatment; single and split
+primary buttons use the same accent colors for idle, hover and press.
+`ArtworkCard` supplies the selected, hover and focus styling for portrait cards
+and Streaming's widescreen cards; aspect ratio, text and badges remain configurable.
+`MovieStyle.Panel` supplies full-area and centered panel geometry and the shared
+surface, padding, title and close controls. Centered panels retain their own
+modal and dismissal policies, so editing and review flows keep their safeguards.
+Refresh retains
 query/filters and displayed results while replacing metadata; Favorites rereads
 saved state. My Library scans immediately, showing `LocalScan` only for unidentified
 files. Review is modeless and defers while hidden. Only explicit Import publishes
@@ -34,8 +47,16 @@ single child unless content dimensions are explicit.
 `ActivityIndicator` derives concurrent tasks/progress from live request and job
 snapshots. It animates only while active/pending and disappears while idle/hidden.
 Canvas allocation/visibility changes must repaint it. Completed jobs belong to
-activity panels; errors and recovery controls stay local. Embedded scan/download/
+activity panels; transfer-start failures are retained there and announced on the
+desktop. Catalogue, setup and contextual errors with nearby recovery controls
+stay local. Embedded scan/download/
 subtitle panels use `showStatus: false` to avoid duplicate routine notices.
+Movies, Series, Games and Books reuse Music's `OperationCenter` for torrent activity;
+the panel lists the selected title's torrents and retains review and hold-to-delete
+actions. `TorrentService` reports observed import/review transitions to the desktop
+notification server, without replaying the initial snapshot. Monitoring continues
+while an accepted download is active and the Space is hidden; closing the Space
+leaves qBittorrent running but stops UI notifications until it is reopened.
 Selection and tab generations prevent older replies from clearing newer loading
 state or replacing content; `resetSelection()` clears all per-title requests.
 External title cards return to Overview even when the same title is selected.
@@ -143,6 +164,13 @@ Idle hidden torrent monitoring stops. Favorites, IMDb/TMDB aliases, custom older
 notes/URLs, local file records and torrent import records remain in
 `$XDG_DATA_HOME/quickshell/desktop/spaces/movies/library.sqlite`. Metadata refresh
 preserves personal records.
+
+My Library exposes the same genre, country, year, score, vote-count and sorting
+controls as Browse. `MediaBrowser.filteredLocalTitles()` applies these to saved
+metadata, alongside text search, without requesting a catalogue page. Country
+matching accepts stored names and ISO codes. Active numeric bounds exclude
+unknown values; sorting places unknown values last. Reset restores the local
+inventory, and an empty filtered result is distinct from an empty library.
 
 SQLite uses short transactions and per-request connections.
 Cache entries in the database are included with personal records; image caches,

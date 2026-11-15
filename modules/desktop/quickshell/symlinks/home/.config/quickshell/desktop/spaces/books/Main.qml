@@ -35,6 +35,7 @@ Item {
     property string error: ""
     // books.json problems outlive catalogue errors until Retry rereads it.
     property string setupError: ""
+    property var deliverNotification: (title, body) => Quickshell.execDetached(["notify-send", "--app-name=Books", "--", title, String(body).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")])
     property string detailError: ""
     property bool loading: true
     property bool detailLoading: false
@@ -102,15 +103,18 @@ Item {
             root.loading = false;
         }
         onJobStartFailed: message => {
-            root.findOffersError = message;
-            activity.notify(message, true);
+            activity.reportError("Book transfer", message);
+            root.deliverNotification("Book transfer", message);
         }
         onJobFinished: job => {
             if (job.state === "finished") {
                 root.refreshLocalLibrary();
-                activity.notify("Book downloaded to " + job.result.path, false);
-            } else if (job.error)
-                activity.notify(job.error, job.state === "failed");
+                root.deliverNotification(job.title || "Book transfer", "Book downloaded to " + job.result.path);
+            } else if (job.state !== "cancelled" && job.error) {
+                if (service.stopped)
+                    activity.reportError(job.title || "Book transfer", job.error);
+                root.deliverNotification(job.title || "Book transfer", job.error);
+            }
         }
     }
     TorrentService {
@@ -123,11 +127,22 @@ Item {
     }
     OperationCenter {
         id: activity
+        objectName: "booksNotifications"
         parent: root
-        jobs: service.jobs
-        notificationTitle: "Books"
+        heading: "Notifications"
+        iconName: "bell"
+        showEmpty: true
+        jobs: service.jobs.concat(torrentFind.notificationJobs)
         onCancelRequested: jobId => service.cancelJob(jobId)
-        onActionRequested: job => service.retryJob(job.job_id)
+        onActionRequested: job => {
+            if (job.torrentJob) {
+                root.tab = "torrent";
+                torrentFind.review(job.torrentJob);
+                close();
+            } else
+                service.retryJob(job.job_id);
+        }
+        onDeleteRequested: job => torrentFind.deleteJob(job.torrentJob)
     }
     function refreshLocalLibrary() {
         if (!active) {
@@ -155,42 +170,27 @@ Item {
     }
     // My Library → Refresh scans Documents/Books at once; only files it cannot
     // identify open this modeless review above the catalogue (Movies' contract).
-    Popup {
+    MovieStyle.Panel {
         id: scanDialog
         objectName: "libraryReview"
         parent: root
-        width: Math.min(1100, parent.width)
-        height: Math.min(700, parent.height)
-        x: (parent.width - width) / 2
-        y: (parent.height - height) / 2
         modal: false
         dim: true
-        focus: true
-        popupType: Popup.Item
-        padding: 14
-        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
         onOpened: contentItem.forceActiveFocus()
         onClosed: root.initialFocus.forceActiveFocus()
         Overlay.modeless: Rectangle {
             color: "#b3000000"
         }
-        background: Rectangle {
-            color: MovieStyle.background
-            border.color: MovieStyle.border
-            radius: MovieStyle.radius
-        }
         contentItem: ColumnLayout {
             spacing: 12
             RowLayout {
                 Layout.fillWidth: true
-                MovieText {
+                MovieStyle.PanelTitle {
                     text: "Unidentified books"
-                    font.bold: true
                     Layout.fillWidth: true
                 }
-                MovieIconButton {
+                MovieStyle.PanelClose {
                     objectName: "closeLibraryReview"
-                    iconName: "x"
                     text: "Close library review"
                     onClicked: scanDialog.close()
                 }
@@ -988,26 +988,13 @@ Item {
         }
         MovieInput {
             id: search
+            clearable: true
             objectName: "bookSearch"
-            rightPadding: 42
             visible: root.searchOpen
             Layout.preferredWidth: Math.min(320, root.width * 0.30)
             placeholderText: "Search books, authors, ISBNs…"
             Accessible.name: "Search books, authors, and ISBNs"
             onTextChanged: searchDelay.restart()
-            MovieIconButton {
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                width: 36
-                height: 36
-                visible: search.text.length > 0
-                iconName: "x"
-                text: "Clear book search"
-                onClicked: {
-                    search.clear();
-                    search.forceActiveFocus();
-                }
-            }
             onAccepted: {
                 searchDelay.stop();
                 root.browse(false, false);
@@ -1026,6 +1013,7 @@ Item {
             }
         }
         MovieIconButton {
+            toolbar: true
             objectName: "searchButton"
             Layout.minimumWidth: 42
             Layout.maximumWidth: 42
@@ -1041,13 +1029,14 @@ Item {
             }
         }
         MovieIconButton {
+            toolbar: true
             objectName: "filtersButton"
             Layout.minimumWidth: 42
             Layout.maximumWidth: 42
             iconName: "sliders-horizontal"
             text: "Book filters"
             enabled: !root.favorites && !root.localMode
-            highlighted: root.filtersOpen
+            highlighted: root.filtersOpen || (!root.favorites && !root.localMode && MovieStyle.filtersActive(root.filters, { sort: search.text.trim() ? "relevance" : "trending" }))
             onClicked: {
                 root.filtersOpen = !root.filtersOpen;
                 if (root.filtersOpen)
@@ -1055,6 +1044,7 @@ Item {
             }
         }
         MovieIconButton {
+            toolbar: true
             objectName: "booksRefreshButton"
             Layout.minimumWidth: 42
             Layout.maximumWidth: 42
@@ -1073,13 +1063,7 @@ Item {
             }
         }
         MovieIconButton {
-            objectName: "booksActivityButton"
-            iconName: "download"
-            text: service.activeJobCount ? "Transfers (" + service.activeJobCount + ")" : "Activity"
-            enabled: activity.hasActivity
-            onClicked: activity.showActivity()
-        }
-        MovieIconButton {
+            toolbar: true
             objectName: "layoutButton"
             Layout.minimumWidth: 42
             Layout.maximumWidth: 42
@@ -1089,6 +1073,14 @@ Item {
                 root.gridMode = !root.gridMode;
                 preferences.setValue("catalogue/grid", root.gridMode);
             }
+        }
+        MovieIconButton {
+            toolbar: true
+            objectName: "booksActivityButton"
+            iconName: "bell"
+            text: "Notifications"
+            highlighted: activity.activeCount > 0
+            onClicked: activity.visible ? activity.close() : activity.showActivity()
         }
     }
 
@@ -1253,10 +1245,9 @@ Item {
                         }
                         MovieIconButton {
                             objectName: "favoriteButton"
-                            highlighted: root.personal.favorite
+                            favoriteControl: true
+                            favorite: !!root.personal.favorite
                             visible: root.workSelected
-                            iconName: root.personal.favorite ? "star-filled" : "star"
-                            text: root.personal.favorite ? "Remove from Favorites" : "Add to Favorites"
                             onClicked: root.saveFavorite(!root.personal.favorite)
                         }
                         MovieIconButton {
@@ -1364,6 +1355,7 @@ Item {
                 TorrentSearch {
                     id: torrentFind
                     showStatus: false
+                    useJobPanel: false
                     objectName: "booksFind"
                     service: localService
                     host: root.host
@@ -1383,6 +1375,7 @@ Item {
                     extraInfo: root.findOffersInfo
                     onExtraSearchRequested: query => root.searchProviders(query)
                     onExtraResultRequested: offer => root.downloadOffer(offer)
+                    onOperationFailed: (title, message) => activity.reportError(title, message)
                     onContextReset: root.resetFindOffers()
                     onImported: {
                         service.request("local_files", {

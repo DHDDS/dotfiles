@@ -526,28 +526,15 @@ Item {
         }
         MovieInput {
             id: search
+            clearable: true
             objectName: "televisionSearch"
             visible: root.searchOpen
-            rightPadding: 40
             Layout.preferredWidth: Math.min(300, root.width * 0.25)
             Layout.minimumWidth: 100
             placeholderText: "Search channels…"
             Accessible.name: "Search television channels"
             onTextChanged: root.scheduleBrowse()
             onAccepted: root.browse(false)
-            MovieIconButton {
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                width: 36
-                height: 36
-                visible: !!search.text
-                iconName: "x"
-                text: "Clear channel search"
-                onClicked: {
-                    search.clear();
-                    search.forceActiveFocus();
-                }
-            }
         }
         Item {
             Layout.minimumWidth: 28
@@ -561,6 +548,7 @@ Item {
             }
         }
         MovieIconButton {
+            toolbar: true
             objectName: "televisionPause"
             visible: root.playback.playing
             enabled: !root.commandPending
@@ -569,6 +557,7 @@ Item {
             onClicked: root.playerCommand("pause")
         }
         MovieIconButton {
+            toolbar: true
             objectName: "televisionStop"
             visible: root.playback.playing || root.commandPending
             iconName: "square"
@@ -576,6 +565,7 @@ Item {
             onClicked: root.playerCommand("stop")
         }
         MovieIconButton {
+            toolbar: true
             objectName: "televisionSearchButton"
             highlighted: root.searchOpen
             iconName: "search"
@@ -589,6 +579,7 @@ Item {
             }
         }
         MovieIconButton {
+            toolbar: true
             objectName: "televisionFiltersButton"
             highlighted: root.filtersOpen || !!root.country || !!root.language || !!root.category
             iconName: "sliders-horizontal"
@@ -596,6 +587,7 @@ Item {
             onClicked: root.filtersOpen = !root.filtersOpen
         }
         MovieIconButton {
+            toolbar: true
             objectName: "televisionRefresh"
             iconName: "refresh-cw"
             text: "Refresh channel directory"
@@ -735,9 +727,9 @@ Item {
                         MovieIconButton {
                             objectName: "televisionFavorite:" + row.index
                             enabled: !root.saving
-                            highlighted: root.isFavorite(row.channel)
-                            iconName: highlighted ? "star-filled" : "star"
-                            text: highlighted ? "Remove favorite " + row.channel.name : "Favorite " + row.channel.name
+                            favoriteControl: true
+                            favorite: root.isFavorite(row.channel)
+                            favoriteSubject: row.channel?.name || ""
                             onClicked: root.toggleFavorite(row.channel)
                         }
                     }

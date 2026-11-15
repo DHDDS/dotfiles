@@ -65,6 +65,9 @@ ShellRoot {
    check(detail.x===16 && detail.width<=1000,"rail detail layout differs from Movies");
    check(Math.abs(rail.y+rail.height-content.height)<2,"rail is not bottom aligned");
    check(find(host.contentItem,"picturesToolbar") && !find(host.contentItem,"picturesSearch").visible,"search is not in the compact toolbar");
+   check(find(host.contentItem,"picturesSearchButton").width===42&&find(host.contentItem,"picturesFiltersButton").width===42&&find(host.contentItem,"wallpaperViewButton").width===42,"Pictures toolbar icon sizes differ");
+   const filterButton=find(host.contentItem,"picturesFiltersButton"),originalFilters=page.filters;
+   check(!filterButton.highlighted,"default Pictures filters appear active");page.filters=Object.assign({},page.filters,{sorting:"toplist"});check(filterButton.highlighted,"active Pictures filter is not indicated");page.filters=originalFilters;
    check(find(host.contentItem,"picturesBackdrop").visible,"selected wallpaper backdrop is missing");
    find(host.contentItem,"pictureFullImage").clicked();
    check(page.dismissTransient(),"gallery did not take Escape");
@@ -77,7 +80,7 @@ ShellRoot {
    page.chooseRandom();page.browse(false);
    find(host.contentItem,"favoriteWallpaperButton").clicked();root.step++;return;
   }
-  if(root.step===2){if(page.favoriteSaving || page.randomLoading)return;check(page.selected.id==="abc123","late random response replaced a newer catalogue");check(page.isFavorite(page.selected),"favorite did not save");page.setDesktopWallpaper();SpaceState.hide();check(!page.active && SpaceState.runningIds.includes("pictures"),"hide discarded Pictures");root.step++;return;}
+  if(root.step===2){if(page.favoriteSaving || page.randomLoading)return;check(page.selected.id==="abc123","late random response replaced a newer catalogue");check(page.isFavorite(page.selected)&&find(page,"favoriteWallpaperButton").highlighted&&find(page,"favoriteWallpaperButton").iconName==="star-filled","favorite did not use the shared selected style");page.setDesktopWallpaper();SpaceState.hide();check(!page.active && SpaceState.runningIds.includes("pictures"),"hide discarded Pictures");root.step++;return;}
   if(root.step===3){if(page.settingWallpaper)return;SpaceState.open("pictures",Quickshell.screens[0]);check(host.currentPage===root.original && page.gridMode,"restore lost retained state");check(page.actionMessage==="Wallpaper and lock updated","background apply was lost");SpaceState.open("movies",Quickshell.screens[0]);root.step++;return;}
   if(root.step===4){if(SpaceState.currentId!=="movies")return;check(SpaceState.runningIds.includes("pictures"),"switch destroyed Pictures");SpaceState.close("pictures");check(SpaceState.runningIds.includes("movies"),"close disturbed Movies");SpaceState.open("pictures",Quickshell.screens[0]);root.step++;return;}
   if(root.step===5){check(page!==root.original,"close did not destroy Pictures");check(page.gridMode,"layout preference did not persist");SpaceState.close("movies");SpaceState.close("pictures");console.log("DISPLAY_PASS");Qt.quit();}
@@ -241,11 +244,13 @@ ShellRoot {
  InteractionState{id:interactions}
  SpaceHost{id:host;interactionState:interactions}
  property int step:0
+ property int notifications:0
  function check(v,m){if(!v)throw new Error(m);}
  Timer{interval:40;running:true;repeat:true;onTriggered:{try{
   if(root.step===0){SpaceState.open("pictures",Quickshell.screens[0]);root.step++;return;}
   const page=host.currentPage;if(!page||page.loading||page.wallpapers.length<2)return;
   if(root.step===1){
+   page.deliverNotification=()=>notifications++;
    page.selectWallpaper(page.wallpapers[0]);page.setDesktopWallpaper();
    page.selectWallpaper(page.wallpapers[1]);
    check(!page.actionFailed && !page.actionMessage,"moving on kept the previous action message");
@@ -253,7 +258,8 @@ ShellRoot {
   }
   if(page.settingWallpaper)return;
   check(page.selected.id==="def456","the failed Apply changed the selection");
-  check(page.actionFailed && page.actionMessage==="Mountain lake: Fixture download failed.","failure was lost or misattributed: "+page.actionMessage);
+  const activity=Array.from(page.data).find(item=>item.objectName==="picturesNotifications");
+  check(!page.actionFailed&&!page.actionMessage&&activity.shownJobs.some(job=>job.title==="Mountain lake"&&job.error==="Fixture download failed.")&&notifications===1,"failure was lost or misattributed");
   SpaceState.close("pictures");console.log("DISPLAY_PASS");Qt.quit();
  }catch(e){console.error("DISPLAY_FAIL",e);Qt.quit();}}}
  Timer{interval:9000;running:true;onTriggered:{console.error("DISPLAY_FAIL timeout");Qt.quit();}}

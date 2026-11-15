@@ -9,6 +9,7 @@ ColumnLayout {
     property bool showLoading: true
     property bool showStatus: true
     property var host
+    property Item jobPanelParent: root
     required property var title
     property string query: ""
     property string error: ""
@@ -35,6 +36,21 @@ ColumnLayout {
     property bool moreLoading: false
     property var jobs: []
     property var extraJobs: []
+    property bool useJobPanel: true
+    readonly property var notificationJobs: jobs.map(job => ({
+            job_id: "torrent:" + job.id,
+            title: job.title || "Download",
+            state: job.active ? "running" : job.status === "review" ? "failed" : job.status === "imported" ? "finished" : "failed",
+            detail: job.message || job.status,
+            done: job.downloaded || 0,
+            total: job.total || 0,
+            speed: job.speed || 0,
+            eta: job.eta,
+            cancellable: false,
+            deleteAvailable: true,
+            actionLabel: job.status === "review" ? "Review files" : "",
+            torrentJob: job
+        }))
     property string reviewJobId: ""
     property var reviewFiles: []
     property bool reviewLoading: false
@@ -44,9 +60,24 @@ ColumnLayout {
     signal extraResultRequested(var result)
     signal contextReset
     signal imported
+    signal reviewRequested
+    signal operationFailed(string title, string message)
+
+    function reportOperationFailure(title, message) {
+        if (useJobPanel)
+            jobPanel.reportError(title, message);
+        else
+            operationFailed(title, message);
+        service.deliverNotification(title, message);
+    }
 
     function showJobPanel() {
-        jobPanel.open();
+        refreshJobs();
+        jobPanel.visible ? jobPanel.close() : jobPanel.showActivity();
+    }
+
+    function closeJobPanel() {
+        jobPanel.close();
     }
 
     function dismissTransient() {
@@ -338,6 +369,7 @@ ColumnLayout {
                         "id": result.id,
                         "titleId": result.titleId,
                         "kind": args.title.kind,
+                        "title": args.title.title,
                         "status": "queued",
                         "active": true,
                         "savePath": result.savePath
@@ -345,16 +377,16 @@ ColumnLayout {
                 ]);
 
             service.pendingDownloads--;
+            if (failure) {
+                reportOperationFailure(args.title.title || "Download", failure);
+                return;
+            }
             if (context !== currentContextId()) {
                 refreshJobs();
                 return;
             }
-            if (failure) {
-                error = failure;
-            } else {
-                info = args.title.kind === "movie" || args.title.kind === "tv" ? "Downloading to " + result.savePath + ". Completed files appear in Local automatically." : "Added to qBittorrent. Import starts when the download completes.";
-                refreshJobs();
-            }
+            info = args.title.kind === "movie" || args.title.kind === "tv" ? "Downloading to " + result.savePath + ". Completed files appear in Local automatically." : "Added to qBittorrent. Import starts when the download completes.";
+            refreshJobs();
         });
     }
 
@@ -438,8 +470,6 @@ ColumnLayout {
                 query = suggestedQuery();
 
             connect();
-        } else {
-            jobPanel.close();
         }
     }
     Component.onCompleted: prepare()
@@ -711,103 +741,30 @@ ColumnLayout {
         }
     }
 
-    Popup {
+    OperationCenter {
         id: jobPanel
         objectName: "downloadJobsPanel"
-
-        parent: root
-        width: Math.min(600, root.width - 24)
-        height: Math.min(implicitHeight, root.height - 24)
-        x: (root.width - width) / 2
-        y: (root.height - height) / 2
-        modal: false
-        focus: true
-        popupType: Popup.Item
-        padding: 14
-
-        background: Rectangle {
-            color: MovieStyle.surface
-            border.color: MovieStyle.border
-            radius: MovieStyle.controlRadius
+        parent: root.jobPanelParent
+        heading: "Notifications"
+        iconName: "bell"
+        showEmpty: true
+        jobs: root.useJobPanel ? root.notificationJobs.concat(root.extraJobs.map(job => ({
+                job_id: "install:" + job.id,
+                title: job.title || "Install",
+                state: job.state === "running" ? "running" : job.state === "completed" ? "finished" : "failed",
+                detail: job.detail,
+                done: job.progress === null || job.progress === undefined ? 0 : job.progress,
+                total: job.progress === null || job.progress === undefined ? 0 : 1,
+                progressVisible: true,
+                unit: "percent",
+                cancellable: false
+            }))) : []
+        onActionRequested: job => {
+            root.reviewRequested();
+            root.review(job.torrentJob);
+            close();
         }
-
-        contentItem: ColumnLayout {
-            spacing: 10
-
-            RowLayout {
-                Layout.fillWidth: true
-
-                MovieText {
-                    text: root.extraJobs.length ? "Downloads" : "Downloads for " + (root.title.title || "this item")
-                    Layout.fillWidth: true
-                    elide: Text.ElideRight
-                }
-
-                MovieIconButton {
-                    iconName: "x"
-                    text: "Close download panel"
-                    onClicked: jobPanel.close()
-                }
-            }
-
-            Repeater {
-                model: root.jobs
-
-                RowLayout {
-                    required property var modelData
-
-                    Layout.fillWidth: true
-
-                    MovieText {
-                        Layout.fillWidth: true
-                        text: modelData.title + " · " + modelData.status + " · " + Math.round((modelData.progress || 0) * 100) + "%"
-                        elide: Text.ElideRight
-                    }
-
-                    MovieButton {
-                        visible: modelData.status === "review"
-                        text: "Review files"
-                        onClicked: {
-                            root.review(modelData);
-                            jobPanel.close();
-                        }
-                    }
-
-                    HoldDelete {
-                        torrent: true
-                        onActivated: root.deleteJob(modelData)
-                    }
-                }
-            }
-
-            Repeater {
-                model: root.extraJobs
-
-                ColumnLayout {
-                    required property var modelData
-                    Layout.fillWidth: true
-
-                    MovieText {
-                        Layout.fillWidth: true
-                        text: modelData.title + " · " + modelData.detail
-                        color: modelData.state === "failed" ? MovieStyle.danger : MovieStyle.text
-                        wrapMode: Text.Wrap
-                    }
-                    ProgressBar {
-                        Layout.fillWidth: true
-                        visible: modelData.state === "running"
-                        indeterminate: modelData.progress === null || modelData.progress === undefined
-                        value: modelData.progress || 0
-                    }
-                }
-            }
-
-            MovieText {
-                visible: !root.jobs.length && !root.extraJobs.length
-                text: "No tracked downloads for this item"
-                color: MovieStyle.muted
-            }
-        }
+        onDeleteRequested: job => root.deleteJob(job.torrentJob)
     }
 
     MovieButton {

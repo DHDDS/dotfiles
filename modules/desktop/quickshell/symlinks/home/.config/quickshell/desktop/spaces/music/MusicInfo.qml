@@ -7,7 +7,7 @@ import QtQml.Models
 import "../../ui"
 import "../movies"
 
-Popup {
+MovieStyle.Panel {
     id: root
     objectName: "musicInformation"
     required property var files
@@ -46,14 +46,11 @@ Popup {
     readonly property string playCountText: song?.playCount !== undefined && song?.playCount !== null ? String(song.playCount) + (song.playCount === 1 ? " play" : " plays") : ""
     property alias coverPicker: coverChooser
     signal saved(var song, var result)
-    width: Math.min(820, parent.width - 40)
-    height: Math.min(900, parent.height - 40)
-    anchors.centerIn: parent
+    maximumPanelWidth: 820
+    maximumPanelHeight: 900
     modal: true
-    focus: true
-    padding: 20
     closePolicy: Popup.NoAutoClose
-    palette.window: MovieStyle.surface
+    palette.window: MovieStyle.background
     palette.windowText: MovieStyle.text
     palette.base: MovieStyle.background
     palette.alternateBase: MovieStyle.surface
@@ -71,12 +68,6 @@ Popup {
     palette.accent: MovieStyle.accent
     palette.toolTipBase: MovieStyle.surface
     palette.toolTipText: MovieStyle.text
-    background: Rectangle {
-        color: MovieStyle.surface
-        radius: 8
-        border.color: MovieStyle.border
-    }
-
     function previewTags(item) {
         return {
             title: item.title || "",
@@ -455,12 +446,10 @@ Popup {
                 Layout.fillWidth: true
                 Layout.minimumWidth: 0
                 spacing: 5
-                MovieText {
+                MovieStyle.PanelTitle {
                     objectName: "musicInfoTitle"
                     Layout.fillWidth: true
                     text: "Song information"
-                    font.bold: true
-                    font.pixelSize: MovieStyle.fontSize * 1.3
                 }
                 MovieText {
                     objectName: "musicFileInfo"
@@ -487,8 +476,8 @@ Popup {
                 enabled: root.editing && !!root.originalPath && !root.busy && (root.dirty || !!root.song?.notUploaded || !!root.song?.pendingUpload)
                 onClicked: root.run("save")
             }
-            MovieIconButton {
-                iconName: "x"
+            MovieStyle.PanelClose {
+                Layout.alignment: Qt.AlignTop
                 text: "Close information"
                 onClicked: root.close()
             }

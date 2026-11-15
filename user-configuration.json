@@ -192,6 +192,7 @@
             "arkenfox-user.js",
             "wallpiper-hyprland",
             "voxtype-bin",
+            "itch-setup-bin",
             "legendary",
             "librespeed-cli-bin",
             "cloudflare-warp-nox-bin",
@@ -2933,12 +2934,20 @@
                 "target": "home/.config/quickshell/desktop/spaces/games/GameStoreButton.qml"
             },
             {
+                "source": "modules/desktop/quickshell/symlinks/home/.config/quickshell/desktop/spaces/games/LaunchSettings.qml",
+                "target": "home/.config/quickshell/desktop/spaces/games/LaunchSettings.qml"
+            },
+            {
                 "source": "modules/desktop/quickshell/symlinks/home/.config/quickshell/desktop/spaces/games/Main.qml",
                 "target": "home/.config/quickshell/desktop/spaces/games/Main.qml"
             },
             {
                 "source": "modules/desktop/quickshell/symlinks/home/.config/quickshell/desktop/spaces/games/README.md",
                 "target": "home/.config/quickshell/desktop/spaces/games/README.md"
+            },
+            {
+                "source": "modules/desktop/quickshell/symlinks/home/.config/quickshell/desktop/spaces/games/SettingsDialog.qml",
+                "target": "home/.config/quickshell/desktop/spaces/games/SettingsDialog.qml"
             },
             {
                 "source": "modules/desktop/quickshell/symlinks/home/.config/quickshell/desktop/spaces/games/backend.py",
@@ -2993,6 +3002,18 @@
                 "target": "home/.config/quickshell/desktop/spaces/games/igdb.py"
             },
             {
+                "source": "modules/desktop/quickshell/symlinks/home/.config/quickshell/desktop/spaces/games/itch.py",
+                "target": "home/.config/quickshell/desktop/spaces/games/itch.py"
+            },
+            {
+                "source": "modules/desktop/quickshell/symlinks/home/.config/quickshell/desktop/spaces/games/launch.py",
+                "target": "home/.config/quickshell/desktop/spaces/games/launch.py"
+            },
+            {
+                "source": "modules/desktop/quickshell/symlinks/home/.config/quickshell/desktop/spaces/games/launcher_setup.py",
+                "target": "home/.config/quickshell/desktop/spaces/games/launcher_setup.py"
+            },
+            {
                 "source": "modules/desktop/quickshell/symlinks/home/.config/quickshell/desktop/spaces/games/presentation.py",
                 "target": "home/.config/quickshell/desktop/spaces/games/presentation.py"
             },
@@ -3011,6 +3032,10 @@
             {
                 "source": "modules/desktop/quickshell/symlinks/home/.config/quickshell/desktop/spaces/games/stores/gog.svg",
                 "target": "home/.config/quickshell/desktop/spaces/games/stores/gog.svg"
+            },
+            {
+                "source": "modules/desktop/quickshell/symlinks/home/.config/quickshell/desktop/spaces/games/stores/itch.svg",
+                "target": "home/.config/quickshell/desktop/spaces/games/stores/itch.svg"
             },
             {
                 "source": "modules/desktop/quickshell/symlinks/home/.config/quickshell/desktop/spaces/games/stores/steam.svg",

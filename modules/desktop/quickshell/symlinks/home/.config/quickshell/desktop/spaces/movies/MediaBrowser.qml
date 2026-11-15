@@ -39,7 +39,7 @@ FocusScope {
     property bool animeGenresLoading: false
     property var filters: ({})
     readonly property bool animeMode: filters.genre === "Anime" && !localMode
-    readonly property bool editingAnime: genre.currentText === "Anime"
+    readonly property bool editingAnime: !localMode && genre.currentText === "Anime"
     property var seasons: []
     property var providerSeasons: []
     // The chosen season; the season picker follows it rather than owning it.
@@ -216,9 +216,12 @@ FocusScope {
             scanDialog.close();
             return true;
         }
+        if (search.text) {
+            search.clear();
+            return true;
+        }
         if (searchOpen) {
             searchOpen = false;
-            search.text = "";
             return true;
         }
         if (filtersOpen) {
@@ -363,6 +366,49 @@ FocusScope {
         event.accepted = false;
     }
 
+    function filteredLocalTitles(items) {
+        const query = search.text.trim().toLowerCase();
+        const f = filters;
+        function number(item, field) {
+            const value = item[field];
+            if (value === undefined || value === null || value === "")
+                return null;
+            const parsed = Number(field === "year" ? String(value).slice(0, 4) : value);
+            return Number.isFinite(parsed) ? parsed : null;
+        }
+        function bound(item, field, limit, minimum) {
+            if (!limit)
+                return true;
+            const value = number(item, field);
+            return value !== null && (minimum ? value >= Number(limit) : value <= Number(limit));
+        }
+        const country = Countries.options.find(option => option.code === f.country);
+        const values = items.filter(item => {
+            const genres = item.genres || [];
+            const genreMatches = !f.genre || genres.includes(f.genre) || f.genre === "Anime" && String(item.id).startsWith("mal:");
+            const countryMatches = !f.country || (item.countries || []).some(value => {
+                const names = typeof value === "string" ? [value] : [value.code, value.iso_3166_1, value.name];
+                return names.some(name => name && [f.country, country?.name].some(wanted => wanted && String(name).toLowerCase() === wanted.toLowerCase()));
+            });
+            return (!query || item.title.toLowerCase().includes(query)) && genreMatches && countryMatches && bound(item, "year", f.minYear, true) && bound(item, "year", f.maxYear, false) && bound(item, "rating", f.rating, true) && bound(item, "votes", f.votes, true);
+        });
+        const field = ({
+                popular: "popularity",
+                rating: "rating",
+                votes: "votes",
+                newest: "year",
+                oldest: "year"
+            })[f.sort];
+        if (field)
+            values.sort((a, b) => {
+                const left = number(a, field), right = number(b, field);
+                if (left === null || right === null)
+                    return left === right ? 0 : left === null ? 1 : -1;
+                return f.sort === "oldest" ? left - right : right - left;
+            });
+        return values;
+    }
+
     function browse(append, keepSelection, refresh) {
         if (!append && !keepSelection)
             linkedTitleId = "";
@@ -383,10 +429,7 @@ FocusScope {
                     error = failure;
                     return;
                 }
-                const query = search.text.trim().toLowerCase();
-                updateCatalogue(result.items.filter(t => {
-                    return !query || t.title.toLowerCase().includes(query);
-                }), false);
+                updateCatalogue(filteredLocalTitles(result.items), false);
                 if (titles.some(t => {
                     return !t.poster;
                 }))
@@ -945,6 +988,7 @@ FocusScope {
     }
     onActiveChanged: {
         if (!active) {
+            torrentPanel.closeJobPanel();
             gallery.close();
             scanDialog.close();
             selectionDelay.stop();
@@ -1071,32 +1115,18 @@ FocusScope {
         parent: root
     }
 
-    Popup {
+    MovieStyle.Panel {
         id: scanDialog
 
         objectName: "libraryReview"
         parent: root
-        width: Math.min(1100, parent.width)
-        height: Math.min(700, parent.height)
-        x: (parent.width - width) / 2
-        y: (parent.height - height) / 2
         modal: false
         dim: true
-        focus: true
-        popupType: Popup.Item
-        padding: 14
-        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
         onOpened: contentItem.forceActiveFocus()
         onClosed: root.initialFocus.forceActiveFocus()
 
         Overlay.modeless: Rectangle {
             color: "#b3000000"
-        }
-
-        background: Rectangle {
-            color: MovieStyle.background
-            border.color: MovieStyle.border
-            radius: MovieStyle.radius
         }
 
         contentItem: ColumnLayout {
@@ -1105,15 +1135,13 @@ FocusScope {
             RowLayout {
                 Layout.fillWidth: true
 
-                MovieText {
+                MovieStyle.PanelTitle {
                     text: "Unidentified " + (root.kind === "tv" ? "episodes" : "movies")
-                    font.bold: true
                     Layout.fillWidth: true
                 }
 
-                MovieIconButton {
+                MovieStyle.PanelClose {
                     objectName: "closeLibraryReview"
-                    iconName: "x"
                     text: "Close library review"
                     onClicked: scanDialog.close()
                 }
@@ -1241,7 +1269,7 @@ FocusScope {
             id: inlineFilters
 
             objectName: "inlineFilters"
-            visible: root.filtersOpen && !root.favorites && !root.localMode
+            visible: root.filtersOpen && (!root.favorites || root.localMode)
             Layout.fillWidth: true
             Layout.preferredWidth: filterFields.implicitWidth
             Layout.minimumWidth: 120
@@ -1289,6 +1317,7 @@ FocusScope {
 
                 MovieChoice {
                     id: sort
+                    objectName: "mediaSortPicker"
 
                     width: 150
                     model: root.editingAnime ? ["Default order", "Popularity", "Highest score", "Most listed", "Newest release", "Oldest release"] : ["Default order", "Popularity", "Highest rating", "Most votes", "Newest release", "Oldest release"]
@@ -1395,8 +1424,8 @@ FocusScope {
 
         MovieInput {
             id: search
+            clearable: true
 
-            rightPadding: 42
             visible: root.searchOpen
             Layout.preferredWidth: Math.min(320, root.width * 0.3)
             objectName: "mediaSearch"
@@ -1407,19 +1436,6 @@ FocusScope {
                 root.browse(false);
             }
 
-            MovieIconButton {
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                width: 36
-                height: 36
-                visible: search.text.length > 0
-                iconName: "x"
-                text: "Clear search"
-                onClicked: {
-                    search.clear();
-                    search.forceActiveFocus();
-                }
-            }
         }
 
         Item {
@@ -1441,6 +1457,7 @@ FocusScope {
         }
 
         MovieIconButton {
+            toolbar: true
             objectName: "searchButton"
             Layout.minimumWidth: 42
             Layout.maximumWidth: 42
@@ -1457,17 +1474,19 @@ FocusScope {
         }
 
         MovieIconButton {
+            toolbar: true
             objectName: "filtersButton"
             Layout.minimumWidth: 42
             Layout.maximumWidth: 42
             iconName: "sliders-horizontal"
             text: "Filters"
-            enabled: !root.favorites && !root.localMode
-            highlighted: root.filtersOpen
+            enabled: !root.favorites || root.localMode
+            highlighted: root.filtersOpen || ((!root.favorites || root.localMode) && MovieStyle.filtersActive(root.filters))
             onClicked: root.filtersOpen = !root.filtersOpen
         }
 
         MovieIconButton {
+            toolbar: true
             objectName: "refreshButton"
             Layout.minimumWidth: 42
             Layout.maximumWidth: 42
@@ -1487,6 +1506,7 @@ FocusScope {
         }
 
         MovieIconButton {
+            toolbar: true
             objectName: "catalogueLayoutToggle"
             Layout.minimumWidth: 42
             Layout.maximumWidth: 42
@@ -1496,6 +1516,14 @@ FocusScope {
                 root.gridMode = !root.gridMode;
                 preferences.setValue("catalogue/grid", root.gridMode);
             }
+        }
+        MovieIconButton {
+            toolbar: true
+            objectName: "mediaNotificationsButton"
+            iconName: "bell"
+            text: "Notifications"
+            highlighted: torrentPanel.jobs.some(job => job.active)
+            onClicked: torrentPanel.showJobPanel()
         }
     }
 
@@ -1675,8 +1703,9 @@ FocusScope {
                     }
 
                     MovieIconButton {
-                        iconName: root.personal.favorite ? "star-filled" : "star"
-                        text: root.personal.favorite ? "Remove favorite" : "Add favorite"
+                        objectName: "mediaFavorite"
+                        favoriteControl: true
+                        favorite: !!root.personal.favorite
                         onClicked: root.save({
                             "favorite": !root.personal.favorite
                         })
@@ -1927,6 +1956,7 @@ FocusScope {
 
                     showStatus: false
                     showLoading: false
+                    jobPanelParent: root
                     service: localService
                     host: root.host
                     objectName: "torrentSearch"
@@ -1935,6 +1965,7 @@ FocusScope {
                     Layout.fillHeight: true
                     title: Object.assign({}, root.selected, root.torrentEpisode)
                     onImported: root.refreshLocalLibrary()
+                    onReviewRequested: root.tab = "torrent"
                 }
 
                 Subtitles {
@@ -2267,9 +2298,10 @@ FocusScope {
             }
 
             MovieText {
+                objectName: "mediaEmptyState"
                 anchors.centerIn: parent
                 visible: !root.loading && !root.titles.length
-                text: root.error ? "" : root.localMode ? "No local titles yet." : root.favorites ? "No saved favorites yet." : "No matching titles."
+                text: root.error ? "" : root.localMode ? (search.text.trim() || Object.values(root.filters).some(Boolean) ? "No matching library titles." : "No local titles yet.") : root.favorites ? "No saved favorites yet." : "No matching titles."
                 color: MovieStyle.muted
             }
         }

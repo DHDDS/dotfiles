@@ -2,6 +2,7 @@
 
 Open **Spaces → Movies** for discovery, search, favorites, anime, cast, trailers,
 provider playback, local files, subtitles and qBittorrent search/import.
+My Library filters use saved title metadata.
 
 Configure `~/.config/quickshell/desktop/spaces/movies/media.json` using
 [media.example.json](media.example.json); keep it mode 0600 once it holds keys,
