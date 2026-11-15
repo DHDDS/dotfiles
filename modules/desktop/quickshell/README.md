@@ -66,7 +66,8 @@ from Spaces to release it.
 
 **Restart → Reload** closes applications and starts a fresh desktop session.
 Shutdown timers continue with the drawer closed. Temporary sleep/locking pauses
-end on shell reload; manual lock and suspend remain available.
+end on shell reload; manual lock and suspend remain available. Closing the lid can
+still suspend the computer, and the session locks before sleep.
 
 ## Capture
 

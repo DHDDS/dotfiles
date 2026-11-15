@@ -782,7 +782,8 @@ atomic JSON. Display leases include hardware identity; dead/disconnected/replace
 leases are ignored/pruned. All end with the shell.
 `desktop-idle` respects application inhibitors, blanks only unprotected outputs
 and defers automatic locking/suspend. Exit 1 plus `defer` means a valid deferral;
-other failures allow locking but block suspend. Manual/before-sleep locks are
+other failures, including unreadable live leases or a missing session identity,
+allow locking but block suspend and blanking. Manual/before-sleep locks are
 unconditional. Without a live display lease, blanking is one global DPMS dispatch.
 
 ## Keyboard

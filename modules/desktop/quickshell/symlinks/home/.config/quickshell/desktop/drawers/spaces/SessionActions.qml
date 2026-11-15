@@ -223,6 +223,12 @@ ColumnLayout {
                 root.closePopup();
             }
         }
+        ShellText {
+            Layout.fillWidth: true
+            color: Theme.muted
+            wrapMode: Text.WordWrap
+            text: qsTr("Keep awake in Displays also pauses idle locking. The session still locks before sleep.")
+        }
     }
     InfoPopover {
         id: sleepMenu
@@ -240,6 +246,12 @@ ColumnLayout {
                 root.service.setSleepPaused(!root.service.sleepPaused);
                 root.closePopup();
             }
+        }
+        ShellText {
+            Layout.fillWidth: true
+            color: Theme.muted
+            wrapMode: Text.WordWrap
+            text: qsTr("Keep awake in Displays also pauses idle sleep. Closing the lid can still put the computer to sleep.")
         }
     }
     InfoPopover {

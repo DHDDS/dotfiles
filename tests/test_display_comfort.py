@@ -150,6 +150,24 @@ class ComfortTests(unittest.TestCase):
                     # The pause decides before the lease needs the compositor.
                     self.assertEqual(comfort.cli(op), expected)
 
+    def test_unreadable_live_leases_and_missing_session_are_errors(self):
+        self.controller.action(dict(op='pause-sleep', enabled=True))
+        lease = self.controller.pause_lease
+        lease.path.write_text('{invalid')
+        for op in ('allow-sleep', 'allow-lock'):
+            with self.subTest(op=op), contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(comfort.cli(op), comfort.HELPER_ERROR)
+        lease.path.write_text('[]')
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(comfort.cli('allow-sleep'), comfort.HELPER_ERROR)
+        self.awake()
+        self.controller.lease.path.write_text('{invalid')
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(comfort.cli('blank'), comfort.HELPER_ERROR)
+        with patch.dict(os.environ, {'HYPRLAND_INSTANCE_SIGNATURE': ''}):
+            with contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(comfort.cli('allow-sleep'), comfort.HELPER_ERROR)
+
     def test_without_leases_idle_checks_skip_the_output_inventory(self):
         # A crashed helper's lease files remain but no longer count.
         self.awake()
@@ -256,6 +274,27 @@ class ComfortTests(unittest.TestCase):
         self.assertEqual(
             list(comfort.session_directory('desktop-session-pauses').iterdir()), []
         )
+
+    def test_all_pause_and_display_combinations(self):
+        # Each session pause affects only its action; a protected display also
+        # prevents either action and leaves the other display free to blank.
+        for awake in (False, True):
+            for sleep in (False, True):
+                for locking in (False, True):
+                    with self.subTest(awake=awake, sleep=sleep, locking=locking):
+                        self.awake(enabled=awake)
+                        self.controller.action(dict(op='pause-sleep', enabled=sleep))
+                        self.controller.action(dict(op='pause-locking', enabled=locking))
+                        self.assertEqual(comfort.idle_action('allow-sleep'), int(sleep or awake))
+                        self.assertEqual(comfort.idle_action('allow-lock'), int(locking or awake))
+                        with patch.object(comfort.backend, 'command') as command:
+                            self.assertEqual(comfort.idle_action('blank'), 0)
+                        target = (
+                            'hl.dsp.dpms({action="off",monitor='
+                            + comfort.backend.lua_string('DP-1') + '})'
+                            if awake else 'hl.dsp.dpms({action="off"})'
+                        )
+                        command.assert_called_once_with('dispatch', target)
 
     def test_session_pauses_fail_closed_after_crash_and_validate_values(self):
         for enabled in (1, 'yes', None):
@@ -387,6 +426,21 @@ class IdleWrapperTests(unittest.TestCase):
                     (self.idle('allow-lock'), self.idle('allow-sleep')), expected
                 )
         (self.helper / 'comfort.py').unlink()
+        self.assertEqual((self.idle('allow-lock'), self.idle('allow-sleep')), (0, 2))
+
+    def test_corrupt_live_pause_does_not_allow_sleep(self):
+        pause = comfort.Lease('desktop-session-pauses')
+        with patch.dict(
+            os.environ,
+            XDG_RUNTIME_DIR=str(self.runtime),
+            HYPRLAND_INSTANCE_SIGNATURE='test',
+        ):
+            pause.publish(dict(sleep=True))
+        self.addCleanup(pause.close)
+        self.assertEqual(self.idle('allow-sleep'), 1)
+        pause.path.write_text('{invalid')
+        # Failure locks normally, but must never be interpreted as permission
+        # to sleep while the session's pause state is unreadable.
         self.assertEqual((self.idle('allow-lock'), self.idle('allow-sleep')), (0, 2))
 
 

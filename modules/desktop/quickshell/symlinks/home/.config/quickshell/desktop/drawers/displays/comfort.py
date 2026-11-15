@@ -78,22 +78,24 @@ class Lease:
 
 
 def live_leases(kind='desktop-keep-awake'):
-    try:
-        directory = session_directory(kind)
-    except RuntimeError:
-        return
+    directory = session_directory(kind)
     for path in directory.glob('lease-*.lock'):
         try:
-            with path.open() as descriptor:
-                try:
-                    fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                except BlockingIOError:
-                    values = json.loads(path.with_suffix('.json').read_text())
-                    if isinstance(values, dict):
-                        yield values
-                # An unlocked file is a dead lease, including after a crash.
-        except (OSError, ValueError, AttributeError):
+            descriptor = path.open()
+        except FileNotFoundError:
+            # The owner can remove a lease while the directory is scanned.
             continue
+        with descriptor:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                # A live but unreadable lease is an error, not permission to
+                # sleep or blank. The wrapper applies the appropriate policy.
+                values = json.loads(path.with_suffix('.json').read_text())
+                if not isinstance(values, dict):
+                    raise ValueError('Invalid idle policy lease.')
+                yield values
+            # An unlocked file is a dead lease, including after a crash.
 
 
 def protected(displays):

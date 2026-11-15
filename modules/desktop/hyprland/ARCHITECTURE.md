@@ -173,14 +173,20 @@ Display drawer toggle, so provisioning does not enable it globally. The native
 
 Hypridle calls `desktop-idle blank` to turn off only unprotected monitors. Lock
 and suspend listeners use `desktop-idle allow-lock` and `allow-sleep` as their
-conditions, retrying every ten seconds. The wrapper invokes the Quickshell display
-helper, which owns the session-local Keep awake leases and independent temporary
-sleep/locking pauses; it exits 0 to allow, 1 to defer and 2 on failure. Python
+conditions, retrying every ten seconds (requires Hypridle 0.1.8 or later). The
+wrapper invokes the Quickshell display helper, which owns the session-local Keep
+awake leases and independent temporary sleep/locking pauses; it exits 0 to allow,
+1 to defer and 2 on failure. Python
 also exits 1 when the helper crashes, so the wrapper trusts status 1 only with
 the helper's printed `defer`. Helper failures allow locking but block automatic
 suspend. See [the display architecture](../quickshell/ARCHITECTURE.md#night-light-and-keep-awake)
-for liveness and hardware matching. Existing application inhibitors are respected.
-Manual lock and before-sleep commands remain unconditional. Idle and system resume
+for liveness and hardware matching. Hypridle normally respects application idle
+inhibitors, but version 0.1.8 does not recheck D-Bus or systemd idle inhibitors
+acquired while a condition retry is pending, so a retry can fire despite a new
+application idle inhibitor. The sleep command still checks logind sleep inhibitors;
+if one blocks the command after its condition succeeds, Hypridle has already
+fired the listener and will not retry until a new idle cycle. Manual lock, lid
+sleep, and before-sleep locks remain unconditional. Idle and system resume
 turn every display on with the DPMS dispatcher, then emit
 `desktop-displays-changed` so the display service reapplies adjustments it skipped
 while panels were dark.
