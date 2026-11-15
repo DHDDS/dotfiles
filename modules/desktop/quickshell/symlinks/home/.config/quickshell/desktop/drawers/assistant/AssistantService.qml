@@ -18,6 +18,10 @@ Singleton {
     property var downloads: []
     property var catalogueGeneration: null
     property var catalogueAliases: ({})
+    property var backends: []
+    property bool backendsKnown: false
+    property string inferenceBackend: "auto"
+    property bool resetBackend: false
     property string error: ""
     property string saveError: ""
     property string attachmentError: ""
@@ -167,6 +171,16 @@ Singleton {
             savePreferences();
         }
     }
+    function chooseBackend(value: string): void {
+        if (busy || (value !== "auto" && !backends.includes(value)))
+            return;
+        if (value === "auto" && inferenceBackend !== "auto")
+            resetBackend = true;
+        else if (value !== "auto")
+            resetBackend = false;
+        inferenceBackend = value;
+        savePreferences();
+    }
 
     function refresh(): void {
         if (checking || (generating && modelAvailable))
@@ -174,8 +188,14 @@ Singleton {
         request({
             op: "status",
             generation: catalogueGeneration,
-            aliases: catalogueAliases
+            aliases: catalogueAliases,
+            need_backends: !backendsKnown
         });
+    }
+    function refreshBackends(): void {
+        if (!online || checking || generating)
+            return;
+        request({op: "status", generation: catalogueGeneration, aliases: catalogueAliases, need_backends: true});
     }
     function connect(): void {
         if (!busy)
@@ -287,7 +307,9 @@ Singleton {
                 length: responseLength,
                 model: preferredModel,
                 style: responseStyle,
-                thinking: preferredThinking
+                thinking: preferredThinking,
+                backend: inferenceBackend,
+                backend_reset: resetBackend
             }) + "\n");
     }
     function newChat(): void {
@@ -378,6 +400,8 @@ Singleton {
             length: responseLength,
             thinking: thinkingMode,
             style: responseStyle,
+            backend: selectedEntry?.recipe === "llamacpp" ? inferenceBackend : "auto",
+            reset_backend: selectedEntry?.recipe === "llamacpp" && resetBackend,
             messages: context
         };
         history.append({
@@ -583,6 +607,9 @@ Singleton {
                     root.responseLength = value.length;
                 if (["default", "precise", "creative"].includes(value.style))
                     root.responseStyle = value.style;
+                if (typeof value.backend === "string" && /^[a-z0-9_-]+$/.test(value.backend))
+                    root.inferenceBackend = value.backend;
+                root.resetBackend = root.inferenceBackend === "auto" && value.backend_reset === true;
                 const thinking = {};
                 for (const [model, mode] of Object.entries(value.thinking || {}))
                     if (["auto", "on", "off"].includes(mode))
@@ -692,6 +719,7 @@ Singleton {
                 op: root.pendingRequest.op,
                 generation: root.pendingRequest.generation,
                 aliases: root.pendingRequest.aliases,
+                need_backends: root.pendingRequest.need_backends,
                 model: root.pendingRequest.model,
                 source: root.pendingRequest.source,
                 repository: root.pendingRequest.repository,
@@ -712,6 +740,12 @@ Singleton {
                         return;
                     }
                     root.online = !!value.online;
+                    if (!root.online)
+                        root.backendsKnown = false;
+                    if (value.backends !== undefined) {
+                        root.backends = value.backends;
+                        root.backendsKnown = true;
+                    }
                     root.installed = !!value.installed;
                     root.scope = value.scope || "";
                     root.serverState = value.state || "inactive";

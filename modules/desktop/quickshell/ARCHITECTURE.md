@@ -78,7 +78,10 @@ default); production synchronization starts through `Theme.start()`. See
 [appearance integration](../../look-and-feel/ARCHITECTURE.md).
 `Card` and the `Shell*` controls centralize appearance. `HoldButton` cancels on
 release, focus loss, disablement or dismissal; key repeat remains one hold.
-`PassiveToolTip` never takes input. Scroll containers reveal keyboard/programmatic
+`PassiveToolTip` never takes input; a passive hover handler keeps existing hints
+available on disabled controls, including inside popovers.
+Shared choices and text inputs use the same disabled opacity as buttons.
+Scroll containers reveal keyboard/programmatic
 focus after layout settles; pointer focus does not scroll.
 
 `FocusNavigation.js` traverses Qt's focus chain inside the active surface, skipping
@@ -234,9 +237,11 @@ requests. Models without native tools retain ordinary chat.
 
 Inference prompts omit UI action payloads while saved tool transcripts retain them
 for validated follow-up refs. Before each round, the backend checks the loaded
-runtime's slot size (not its advertised model capacity). Local llama.cpp backends
-provide the full chat template and tokenizer; other/unloaded backends use a byte
-estimate. The budget reserves reply space, removes whole older turns, then bounds
+runtime's slot size (not its advertised model capacity). For an unloaded model,
+Lemonade's resolved context estimate is used when available; an unavailable
+endpoint falls back to 8,192 tokens. Local llama.cpp backends provide the full
+chat template and tokenizer; other/unloaded backends use a byte estimate. The
+budget reserves reply space, removes whole older turns, then bounds
 tool results without splitting call/result exchanges or truncating the current
 user request. A server context rejection updates the estimate and retries that
 inference once, without rerunning tools. `test_assistant_budget.py` covers runtime
@@ -383,7 +388,7 @@ stdout, stderr, exit status and other details expand on demand. Calls returned i
 one model batch are run in their original order, one approval at a time, with a
 batch position shown in the row. Completed tool transcripts stay in the in-memory
 conversation for follow-up turns, including after interruption, disconnect or
-loop limits. Unexecuted calls receive explicit results; interrupted executions
+memory limits. Unexecuted calls receive explicit results; interrupted executions
 warn of uncertain side effects. Switching to a model without tools retains the
 transcript as untrusted text in an ordinary assistant message. Saved transcripts
 must have matched call/result pairs and a terminal assistant message. Tool output
@@ -402,9 +407,12 @@ in their own process group. Cancellation/timeout terminates and reaps the group,
 including descendants that inherit pipes after their leader exits. This does not
 contain intentionally daemonized processes from an approved arbitrary script.
 Captured stdout/stderr are capped at 16 KiB each, then each tool result is bounded
-to 16 KiB combined. Tool transcript size is capped at 128 KiB, SSE events at
+to 16 KiB combined. Tool transcript size is capped at 512 KiB, SSE events at
 256 KiB, and generated text/reasoning across all rounds at 160,000/64,000
-characters. Agent workflows stop after eight model rounds or 24 tool calls.
+characters. Agent workflows continue until the model finishes, the context or
+memory bounds are reached, or the user cancels; there is no fixed round or call
+count. Conversation text is bounded at one million characters and 24 MiB of
+serialized data to protect the shell and helper from unbounded input.
 
 First Send uses Lemonade's native download/load behavior, not a client download
 queue. In 2026.45.3 that path creates no managed download job and cannot cancel
@@ -421,8 +429,8 @@ received before a failure is kept. Cancel terminates the request and retains
 partial text; retry replaces the last answer. Completion marks an empty final
 answer separately from earlier tool prefaces, so a preface cannot disguise a
 missing answer. The UI reports the missing answer while retaining tool results;
-retries remain explicit. A reply is cut at 160,000
-characters, the context limit it could never be sent back under. Consecutive
+retries remain explicit. A reply is cut at 160,000 characters to bound the UI's
+memory use. Consecutive
 turns of one role, left by a failed reply, are sent as one turn because many chat
 templates require alternation. Reasoning is bounded separately to 64,000
 characters and excluded from future context. Reply length changes the system
@@ -431,7 +439,15 @@ instruction, not token caps that would also consume the reasoning budget.
 temperature only for Precise/Creative. A reply that ends while no drawer observes
 the service sends a notification.
 
-`assistant.json` stores `model`, `length`, `style` and per-model/alias `thinking`.
+`assistant.json` stores `model`, `length`, `style`, per-model/alias `thinking`,
+and a global llama.cpp backend choice. Installed backend choices come from the
+optional `/v1/system-info` endpoint and refresh when the options open. Explicit
+choices use `/v1/load` without saving Lemonade model options before chat; they
+reuse a matching loaded model and refuse to reload a busy or pinned one. Returning
+to Automatic requests a native load without a backend override so Lemonade's
+model and server defaults apply, including after a shell restart. Automatic keeps
+the ordinary first-send path until that switch is made. Other model recipes ignore
+the choice. No model list is stored in this configuration.
 Chat stays in memory, bounded to 80 messages. Offline Send freezes prompt/settings/
 attachments; after connecting, that exact model must still exist. A missing model
 or failed startup preserves the draft, including later typing.
@@ -565,7 +581,7 @@ open/fstat rejects special files. QImageReader bounds source images to 40 MP /
 128 MiB allocation, auto-orients, scales to 2048 pixels and re-encodes within
 4 MiB. Text accepts UTF-8/BOM UTF-16. PDF uses bounded, timed `pdftotext` via stdin;
 DOCX/ODT use bounded UTF-8 XML extraction without DTD/entities. Extraction refuses more
-than 64,000 characters/document; context caps are 160,000 text characters and
+than 64,000 characters/document; context caps are one million text characters and
 24 MiB encoded. Oversize input fails visibly. Generation revalidates snapshots
 and vision support; it never reads paths or fetches attachment URLs.
 

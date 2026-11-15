@@ -472,35 +472,95 @@ class AssistantAgentTests(unittest.TestCase):
         self.assertIn('not executed', saved[2]['content'])
         backend.validate_tool_context(saved)
 
-    def test_round_call_and_context_limits_stop_further_execution(self):
-        for limit, value, expected_calls in [
-            ('MAX_AGENT_ROUNDS', 2, 2),
-            ('MAX_TOOL_CALLS', 1, 1),
-            ('MAX_AGENT_CONTEXT', 100, 0),
-        ]:
-            with (
-                self.subTest(limit=limit),
-                patch.object(backend, limit, value),
-                self.agent([tool_stream(tool_call()) for _ in range(3)]) as (
-                    chat,
-                    emitted,
-                    _sent,
-                ),
-                patch.object(
-                    backend,
-                    'execute_tool',
-                    return_value={'stdout': 'checked', 'exit_code': 0},
-                ) as execute,
-            ):
-                chat()
-                self.assertEqual(execute.call_count, expected_calls)
-                self.assertEqual(emitted[-1], {'type': 'done', 'limited': True})
-                self.assertTrue(
-                    any(
-                        row.get('type') == 'error' and 'limit' in row['error']
-                        for row in emitted
+    def test_long_workflow_keeps_going_and_saves_valid_tool_context(self):
+        streams = [tool_stream(tool_call(identifier=f'call-{n}')) for n in range(30)]
+        streams.append(
+            event_stream(
+                [
+                    {
+                        'choices': [
+                            {'delta': {'content': 'Done.'}, 'finish_reason': 'stop'}
+                        ]
+                    }
+                ]
+            )
+        )
+        with (
+            self.agent(streams) as (chat, emitted, sent),
+            patch.object(
+                backend.PromptBudget,
+                'refresh',
+                lambda budget: setattr(budget, 'context', 65536),
+            ),
+            patch.object(
+                backend,
+                'execute_tool',
+                return_value={'stdout': 'checked', 'exit_code': 0},
+            ) as execute,
+        ):
+            chat()
+        self.assertEqual(execute.call_count, 30)
+        self.assertEqual(len(sent), 31)
+        self.assertFalse(emitted[-1]['limited'])
+        saved = emitted[-1]['tool_context']
+        backend.validate_tool_context(saved)
+        with (
+            self.agent(
+                [
+                    event_stream(
+                        [
+                            {
+                                'choices': [
+                                    {
+                                        'delta': {'content': 'Continued.'},
+                                        'finish_reason': 'stop',
+                                    }
+                                ]
+                            }
+                        ]
                     )
-                )
+                ]
+            ) as (_chat, replies, followup),
+            patch.object(
+                backend.PromptBudget,
+                'refresh',
+                lambda budget: setattr(budget, 'context', 65536),
+            ),
+        ):
+            backend.chat(
+                {
+                    'model': 'local',
+                    'messages': [
+                        {'role': 'user', 'content': 'Investigate'},
+                        {
+                            'role': 'assistant',
+                            'content': 'Done.',
+                            'tool_context': saved,
+                        },
+                        {'role': 'user', 'content': 'What did you find?'},
+                    ],
+                }
+            )
+        self.assertEqual(
+            sum(row['role'] == 'tool' for row in followup[0]['messages']), 30
+        )
+        self.assertEqual(replies[-1]['type'], 'done')
+
+    def test_tool_context_memory_limit_stops_further_execution(self):
+        with (
+            patch.object(backend, 'MAX_AGENT_CONTEXT', 100),
+            self.agent([tool_stream(tool_call())]) as (chat, emitted, _sent),
+            patch.object(backend, 'execute_tool') as execute,
+        ):
+            chat()
+        execute.assert_not_called()
+        self.assertEqual(emitted[-1], {'type': 'done', 'limited': True})
+        self.assertTrue(
+            any(
+                row.get('type') == 'error' and 'limit' in row['error']
+                for row in emitted
+            )
+        )
 
     def test_output_and_sse_limits_bound_backend_memory_before_actions(self):
         for field, limit in [

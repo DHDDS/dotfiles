@@ -97,6 +97,8 @@ remote content: images appear as links and HTML as text. Copy gives the original
 Markdown. Native aliases can be created with `lemonade alias add NAME MODEL_ID`.
 Model search includes Hugging Face and ModelScope catalogs through Lemonade;
 enter at least three characters, then choose a repository and quantization to download.
+The assistant options can select an installed llama.cpp inference backend; a new
+choice takes effect on the next message and may reload the model.
 Tool-capable models can inspect local files and system state, search Spaces, and
 recommend items using genre, years, ratings and other filters. They can present
 a chosen shortlist as cards with reasons, including in follow-up replies.

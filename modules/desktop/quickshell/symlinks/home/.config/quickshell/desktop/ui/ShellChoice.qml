@@ -5,6 +5,7 @@ import "."
 ComboBox {
     id: root
     implicitHeight: Theme.controlHeight + 4
+    opacity: enabled ? 1 : 0.45
     font.family: Theme.fontFamily
     font.pixelSize: Theme.fontSize
     palette.text: Theme.text

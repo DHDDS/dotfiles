@@ -3959,6 +3959,7 @@
     "packages": [
         "extra/openai-codex",
         "extra/lemonade-server",
+        "python",
         "extra/opencode",
         "ark",
         "unrar",
@@ -4017,7 +4018,6 @@
         "python-gobject",
         "python-guessit",
         "mpvpaper",
-        "python",
         "ffmpeg",
         "whisper-cpp",
         "mpv",

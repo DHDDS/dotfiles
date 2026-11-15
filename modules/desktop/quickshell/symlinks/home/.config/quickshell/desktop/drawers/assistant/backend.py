@@ -34,10 +34,8 @@ LENGTHS = {
     'balanced': 'Use enough detail to make the answer useful.',
     'detailed': 'Give a thorough, well-structured answer.',
 }
-MAX_AGENT_ROUNDS = 8
-MAX_TOOL_CALLS = 24
 MAX_TOOL_OUTPUT = 16_000
-MAX_AGENT_CONTEXT = 128 * 1024
+MAX_AGENT_CONTEXT = 512 * 1024
 MAX_STREAM_TEXT = 160_000
 MAX_STREAM_REASONING = 64_000
 MAX_SSE_EVENT = 256 * 1024
@@ -589,6 +587,7 @@ def chat_models(data, *, catalogue=False, aliases=None):
                 downloaded=row.get('downloaded') is True,
                 size=row.get('size', 0),
                 labels=row.get('labels', []),
+                recipe=row.get('recipe', ''),
                 supportsTools='tool-calling' in row.get('labels', []),
                 alias=row['id'] in aliases,
                 target=target(row['id']),
@@ -609,7 +608,22 @@ def chat_models(data, *, catalogue=False, aliases=None):
     )
 
 
-def status(known_generation=None, known_aliases=None):
+def installed_llamacpp_backends(url):
+    info = get_json(url + '/v1/system-info')
+    backends = info.get('recipes', {}).get('llamacpp', {}).get('backends', {})
+    return sorted(
+        name
+        for name, details in backends.items()
+        if isinstance(name, str)
+        and re.fullmatch(r'[a-z0-9_-]+', name)
+        and isinstance(details, dict)
+        and details.get('state') == 'installed'
+    )
+
+
+def status(known_generation=None, known_aliases=None, need_backends=None):
+    if need_backends is None:
+        need_backends = known_generation is None
     scope, state = service()
     url = server_url(scope)
     result = dict(
@@ -644,6 +658,18 @@ def status(known_generation=None, known_aliases=None):
             result['error'] = 'Lemonade failed to start. Check its service logs.'
     else:
         result['online'] = True
+        if need_backends:
+            try:
+                result['backends'] = installed_llamacpp_backends(url)
+            except (
+                OSError,
+                ValueError,
+                TypeError,
+                AttributeError,
+                http.client.HTTPException,
+            ):
+                # Optional capability metadata must not prevent ordinary chat.
+                pass
         result['loaded'] = [
             dict(
                 id=row['model_name'],
@@ -888,7 +914,11 @@ def control(op, value=None):
     if op in ('registry_search', 'registry_variants', 'registry_install'):
         return registry_control(op, value)
     if op == 'status':
-        return status(value.get('generation'), value.get('aliases'))
+        return status(
+            value.get('generation'),
+            value.get('aliases'),
+            value.get('need_backends', True),
+        )
     if op == 'connect':
         snapshot = status()
         if snapshot['online'] or not snapshot['installed']:
@@ -1912,7 +1942,7 @@ def call_tool(
 
 
 def validate_tool_context(context):
-    if not isinstance(context, list) or len(context) > MAX_TOOL_CALLS * 2 + 1:
+    if not isinstance(context, list):
         raise ValueError('Invalid saved tool context.')
     if (
         len(json.dumps(context, ensure_ascii=False).encode('utf-8'))
@@ -2038,6 +2068,11 @@ class PromptBudget:
                 None,
             )
             if not loaded:
+                identifier = urllib.parse.quote(self.entry['id'], safe='')
+                options = get_json(self.url + '/v1/models/' + identifier + '/options')
+                size = options.get('resolved_ctx_size')
+                if type(size) is int and size > 0:
+                    self.context = size
                 return
             size = loaded.get('recipe_options', {}).get('ctx_size')
             if type(size) is int and size > 0:
@@ -2336,6 +2371,11 @@ def chat(value):
             'This local chat model is unavailable. Choose another model or open Lemonade.'
         )
     supports_tools = 'tool-calling' in entry['labels']
+    selected_backend = value.get('backend', 'auto')
+    if not isinstance(selected_backend, str) or not re.fullmatch(
+        r'[a-z0-9_-]+', selected_backend
+    ):
+        raise ValueError('Invalid inference backend.')
     length = LENGTHS[value.get('length', 'brief')]
     messages = value.get('messages', [])
     if (
@@ -2435,6 +2475,55 @@ def chat(value):
         payload['temperature'] = 0.2 if style == 'precise' else 0.9
     if supports_tools:
         payload.update(tools=TOOLS, tool_choice='auto')
+    if entry['recipe'] == 'llamacpp' and (
+        selected_backend != 'auto' or value.get('reset_backend') is True
+    ):
+        if (
+            selected_backend != 'auto'
+            and selected_backend not in installed_llamacpp_backends(url)
+        ):
+            raise ValueError(
+                'The selected inference backend is not installed or available in Lemonade.'
+            )
+        aliases = model_aliases(url)
+        target = model
+        seen = set()
+        while target in aliases and target not in seen:
+            seen.add(target)
+            target = aliases[target]
+        health = get_json(url + '/v1/health')
+        loaded = next(
+            (
+                row
+                for row in health.get('all_models_loaded', [])
+                if row.get('model_name') in (model, target)
+            ),
+            None,
+        )
+        current = (loaded or {}).get('recipe_options', {}).get('llamacpp_backend')
+        needs_load = not loaded or (
+            current not in (None, '', 'auto')
+            if selected_backend == 'auto'
+            else current != selected_backend
+        )
+        if (
+            loaded
+            and needs_load
+            and any(loaded.get(flag) for flag in ('is_busy', 'is_streaming', 'pinned'))
+        ):
+            raise ValueError(
+                'This model is in use or pinned in Lemonade; wait or unpin it before changing its backend.'
+            )
+        if needs_load:
+            options = {'model_name': model}
+            if selected_backend != 'auto':
+                options['llamacpp_backend'] = selected_backend
+            seconds = 3600 if not entry['downloaded'] else 600
+            with time_limit(seconds, 'Lemonade timed out while loading the model.'):
+                with request(url + '/v1/load', options, timeout=seconds) as response:
+                    result = json.load(response)
+            if result.get('error'):
+                raise ValueError(str(result['error']))
     budget = PromptBudget(url, entry)
     counts = {'text': 0, 'reasoning': 0}
     total_calls, turn_context_bytes = 0, 0
@@ -2483,7 +2572,8 @@ def chat(value):
         emit({'type': 'context', 'tool_context': saved})
 
     try:
-        for round_index in range(MAX_AGENT_ROUNDS):
+        round_index = 0
+        while True:
             if round_index and not budget.native:
                 budget.refresh()
             budget.fit(payload)
@@ -2534,10 +2624,6 @@ def chat(value):
                     )
                 )
                 return
-            if total_calls + len(calls) > MAX_TOOL_CALLS:
-                raise AgentLimit(
-                    f'The assistant reached its {MAX_TOOL_CALLS}-call safety limit.'
-                )
             for call in calls:
                 if not call['id'] or call['id'] in seen_ids:
                     call['id'] = 'call_' + uuid.uuid4().hex
@@ -2593,10 +2679,7 @@ def chat(value):
                 conversation.append(model_tool_message(tool_message))
                 turn_context.append(tool_message)
                 turn_context_bytes += context_size
-            if round_index == MAX_AGENT_ROUNDS - 1:
-                raise AgentLimit(
-                    f'The assistant reached its {MAX_AGENT_ROUNDS}-round safety limit.'
-                )
+            round_index += 1
     except AgentLimit as exc:
         export_interrupted_context()
         emit(dict(type='error', error=str(exc)))

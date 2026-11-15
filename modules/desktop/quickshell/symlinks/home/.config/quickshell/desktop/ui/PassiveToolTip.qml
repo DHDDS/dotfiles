@@ -10,16 +10,16 @@ PopupWindow {
     property int maximumLineCount: 6
     property bool above: false
     property bool ready: false
-    readonly property bool hovered: target instanceof T.AbstractButton ? target.hovered : targetHover.hovered
+    readonly property bool hovered: !target ? false : target.enabled && target instanceof T.AbstractButton ? target.hovered : !!targetHover?.hovered
     // Keyboard focus shows the tip too; pointer and programmatic focus do not.
     // A hidden surface can keep its focus item, unlike its hover.
     readonly property bool focused: target instanceof T.Control && (target as T.Control).visualFocus && !!target.Window.window?.visible
-    readonly property bool requested: !!target && (hovered || focused) && !(target instanceof T.AbstractButton && target.down) && target.enabled && target.visible && text.length > 0
+    readonly property bool requested: !!target && (hovered || focused) && !(target instanceof T.AbstractButton && target.down) && target.visible && !!target.Window.window?.visible && text.length > 0
 
+    // HoverHandler continues observing its target when a control is disabled.
     HoverHandler {
         id: targetHover
         parent: root.target
-        enabled: !(root.target instanceof T.AbstractButton)
     }
 
     onRequestedChanged: {

@@ -1029,6 +1029,109 @@ class AssistantBackendTests(unittest.TestCase):
         self.assertEqual(sent[0][0], 'http://localhost:13305/v1/chat/completions')
         self.assertEqual(sent[0][1]['model'], 'new')
 
+    def test_backend_choice_loads_or_reuses_the_model_and_respects_busy_state(self):
+        def exercise(
+            choice, loaded=None, reset=False, installed=True, recipe='llamacpp'
+        ):
+            calls = []
+
+            def get(url):
+                if '/models?' in url:
+                    return {'data': [model() | {'recipe': recipe}]}
+                if url.endswith('/system-info'):
+                    return {
+                        'recipes': {
+                            'llamacpp': {
+                                'backends': {
+                                    'rocm': {
+                                        'state': 'installed'
+                                        if installed
+                                        else 'installable'
+                                    },
+                                    'vulkan': {'state': 'installed'},
+                                }
+                            }
+                        }
+                    }
+                if url.endswith('/internal/aliases'):
+                    return {'aliases': []}
+                if url.endswith('/health'):
+                    return {'all_models_loaded': [loaded] if loaded else []}
+                raise AssertionError(url)
+
+            def request(url, payload=None, **kwargs):
+                calls.append((url, payload))
+                return io.BytesIO(
+                    b'{}' if url.endswith('/load') else b'data: [DONE]\n\n'
+                )
+
+            with (
+                patch.object(backend, 'service', return_value=('user', {})),
+                patch.object(
+                    backend, 'server_url', return_value='http://localhost:13305'
+                ),
+                patch.object(backend, 'get_json', side_effect=get),
+                patch.object(backend, 'request', side_effect=request),
+                patch.object(backend, 'emit'),
+                patch.object(backend.PromptBudget, 'refresh'),
+            ):
+                backend.chat(
+                    dict(
+                        model='local',
+                        backend=choice,
+                        reset_backend=reset,
+                        messages=[dict(role='user', content='hello')],
+                    )
+                )
+            return calls
+
+        loaded_vulkan = {
+            'model_name': 'local',
+            'recipe_options': {'llamacpp_backend': 'vulkan'},
+        }
+        calls = exercise('rocm', loaded_vulkan)
+        self.assertEqual(
+            calls[0][1], {'model_name': 'local', 'llamacpp_backend': 'rocm'}
+        )
+        self.assertTrue(calls[1][0].endswith('/chat/completions'))
+        loaded_rocm = {
+            'model_name': 'local',
+            'recipe_options': {'llamacpp_backend': 'rocm'},
+        }
+        self.assertEqual(len(exercise('rocm', loaded_rocm)), 1)
+        self.assertEqual(
+            exercise('auto', loaded_rocm, reset=True)[0][1], {'model_name': 'local'}
+        )
+        self.assertEqual(
+            len(exercise('auto', {'model_name': 'local', 'pinned': True}, reset=True)),
+            1,
+        )
+        self.assertEqual(len(exercise('auto')), 1)
+        self.assertEqual(len(exercise('rocm', recipe='flm')), 1)
+        with self.assertRaisesRegex(ValueError, 'not installed'):
+            exercise('rocm', installed=False)
+        with self.assertRaisesRegex(ValueError, 'in use or pinned'):
+            exercise('rocm', loaded_vulkan | {'pinned': True})
+
+    def test_backend_discovery_only_offers_installed_backends(self):
+        info = {
+            'recipes': {
+                'llamacpp': {
+                    'backends': {
+                        'vulkan': {'state': 'installed'},
+                        'rocm': {'state': 'installed'},
+                        'cuda': {'state': 'unsupported'},
+                        'cpu': {'state': 'installable'},
+                    }
+                }
+            }
+        }
+        with patch.object(backend, 'get_json', return_value=info):
+            self.assertEqual(
+                backend.installed_llamacpp_backends('http://localhost'),
+                ['rocm', 'vulkan'],
+            )
+
     def test_incomplete_stream_and_server_errors_remain_failures(self):
         with self.assertRaisesRegex(ValueError, 'disconnected'):
             self.chat(b'data: {"choices":[{"delta":{"content":"partial"}}]}\n\n')
@@ -1395,6 +1498,63 @@ class AssistantDrawerTests(unittest.TestCase):
         # A reply that outlives its page notifies; never on the session bus.
         return support.run_qml(self, body, setup, **{'isolate_bus': True, **options})
 
+    def test_backend_selector_saves_the_choice_and_sends_reset_for_auto(self):
+        def setup(root):
+            fixture = FAKE_BACKEND.replace(
+                "for row in models:row.update(alias=False,target=row['id'])",
+                "for row in models:row.update(alias=False,target=row['id'],recipe='llamacpp')",
+            ).replace(
+                "if state['online']:result.update(models=models,generation=2 if state['new'] else 1,aliases=state.get('aliases',{}))",
+                "if state['online']:result.update(models=models,generation=2 if state['new'] else 1,aliases=state.get('aliases',{}),backends=['rocm','vulkan'])",
+            )
+            (root / 'drawers/assistant/backend.py').write_text(fixture)
+
+        self.run_qml(
+            """import QtQuick
+import Quickshell
+import Quickshell.Io
+import "ui"
+import "drawers"
+import "drawers/assistant"
+ShellRoot {
+ property int stage:0
+ property int tries:0
+ FloatingWindow {implicitWidth:420;implicitHeight:580;visible:true
+  AssistantDrawer {id:drawer;anchors.fill:parent;active:true}
+ }
+ FileView {id:request;path:Quickshell.env("XDG_STATE_HOME")+"/request.json";blockLoading:true;printErrors:false}
+ FileView {id:prefs;path:Quickshell.env("XDG_CONFIG_HOME")+"/quickshell/desktop/assistant.json";blockLoading:true;printErrors:false}
+ function check(ok,message){if(!ok)throw new Error(message);}
+ function find(item,name){if(item.objectName===name)return item;for(const child of item.children??[]){const found=find(child,name);if(found)return found;}return null;}
+ Timer {interval:100;repeat:true;running:true;onTriggered:{try{
+  if(++tries>100)throw new Error("timeout "+stage+" "+AssistantService.error);
+  if(stage===0){
+   if(!AssistantService.online||AssistantService.checking||!AssistantService.backendsKnown)return;
+   drawer.optionsPopup.open();
+   const choice=find(drawer.optionsPopup.contentItem,"assistantBackend");
+   check(choice.visible&&choice.enabled&&choice.model.length===3,"backend choices unavailable");
+   choice.activated(choice.model.findIndex(row=>row.id==="rocm"));
+   check(AssistantService.inferenceBackend==="rocm","choice not applied");
+   AssistantService.draft="hello";check(AssistantService.send(),"send refused");
+  }else if(stage===1){
+   if(AssistantService.generating)return;
+   request.reload();request.waitForJob();check(JSON.parse(request.text()).backend==="rocm","backend not sent");
+   prefs.reload();prefs.waitForJob();check(JSON.parse(prefs.text()).backend==="rocm","choice not saved");
+   AssistantService.chooseBackend("auto");AssistantService.draft="again";check(AssistantService.send(),"auto send refused");
+  }else{
+   if(AssistantService.generating)return;
+   request.reload();request.waitForJob();const sent=JSON.parse(request.text());
+   check(sent.backend==="auto"&&sent.reset_backend,"auto did not request default reload");
+   prefs.reload();prefs.waitForJob();const saved=JSON.parse(prefs.text());
+   check(saved.backend==="auto"&&saved.backend_reset,"auto reset was not persisted");
+   console.log("DISPLAY_PASS");Qt.quit();
+  }
+  stage++;tries=0;
+ }catch(e){console.error("DISPLAY_FAIL",stage,e);Qt.quit();}}}
+}""",
+            setup,
+        )
+
     def test_tool_activity_shows_exact_preview_and_rejection_continues_chat(self):
         def setup(root):
             (root / 'drawers/assistant/backend.py').write_text(AGENT_FAKE_BACKEND)
@@ -1602,6 +1762,12 @@ ShellRoot {
    if(!AssistantService.checked||AssistantService.checking)return;
    check(!AssistantService.online&&!AssistantService.models.length,"opening drawer started the engine");
    check(find(drawer,"assistantModel").enabled,"cold model picker is disabled");
+   drawer.optionsPopup.open();
+   const backendChoice=find(drawer.optionsPopup.contentItem,"assistantBackend");
+   const backendTip=backendChoice.data.find(item=>item.target===backendChoice);
+   check(!backendChoice.enabled&&backendChoice.opacity<0.6,"unavailable backend choice is not visibly disabled");
+   check(backendTip&&backendTip.text.includes("Start Lemonade"),"disabled backend choice does not explain how to enable it");
+   drawer.optionsPopup.close();
    AssistantService.draft="keep this draft";drawer.active=false;
   }else if(stage===1){
    drawer.active=true;

@@ -34,6 +34,16 @@ DrawerPage {
             label: qsTr("Detailed")
         }
     ]
+    readonly property var backendChoices: {
+        const names = {rocm: "ROCm", vulkan: "Vulkan", cuda: "CUDA", cpu: "CPU", metal: "Metal", system: qsTr("System")};
+        const choices = [{id: "auto", label: qsTr("Automatic")}];
+        for (const id of AssistantService.backends)
+            choices.push({id, label: names[id] || id});
+        const selected = AssistantService.inferenceBackend;
+        if (selected !== "auto" && !AssistantService.backends.includes(selected))
+            choices.push({id: selected, label: qsTr("%1 (unavailable)").arg(names[selected] || selected)});
+        return choices;
+    }
     readonly property var promptStarters: [
         {
             label: qsTr("Explain a topic"),
@@ -731,6 +741,8 @@ DrawerPage {
                         hint: qsTr("Thinking: %1 · Reply: %2\nStyle and model memory").arg(AssistantService.thinkingMode).arg(AssistantService.responseLength)
                         onClicked: {
                             modelPicker.close();
+                            if (!options.visible)
+                                AssistantService.refreshBackends();
                             options.visible ? options.close() : options.open();
                         }
                     }
@@ -829,6 +841,27 @@ DrawerPage {
             PassiveToolTip {
                 target: styleChoice
                 text: qsTr("Keep model defaults, or favor consistency or variety")
+            }
+        }
+        ShellText {
+            text: qsTr("Inference backend")
+            font.weight: Font.Medium
+            visible: !AssistantService.selectedEntry || AssistantService.selectedEntry.recipe === "llamacpp"
+        }
+        ShellChoice {
+            id: backendChoice
+            objectName: "assistantBackend"
+            Layout.fillWidth: true
+            visible: !AssistantService.selectedEntry || AssistantService.selectedEntry.recipe === "llamacpp"
+            model: root.backendChoices
+            textRole: "label"
+            currentIndex: root.backendChoices.findIndex(row => row.id === AssistantService.inferenceBackend)
+            enabled: !AssistantService.busy && AssistantService.backendsKnown && root.backendChoices.length > 1
+            Accessible.name: qsTr("Inference backend")
+            onActivated: index => AssistantService.chooseBackend(root.backendChoices[index].id)
+            PassiveToolTip {
+                target: backendChoice
+                text: !AssistantService.online ? qsTr("Start Lemonade to choose an inference backend.") : AssistantService.busy ? qsTr("Wait for the current operation to finish before changing the backend.") : !AssistantService.backendsKnown ? (AssistantService.checking ? qsTr("Checking installed inference backends…") : qsTr("Could not check the installed inference backends.")) : root.backendChoices.length <= 1 ? qsTr("No installed inference backends are available.") : qsTr("Applies to llama.cpp models on the next message. Changing backend may reload the model.")
             }
         }
     }

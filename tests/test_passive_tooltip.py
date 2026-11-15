@@ -38,7 +38,16 @@ FloatingWindow {
         onClicked: root.clicks++
     }
     TextField { id: field; x: 20; y: 120; width: 200; height: 40 }
+    UI.PlainInputField { id: disabledField; x: 20; y: 175; width: 180; enabled: false }
     Button { id: save; x: 250; y: 120; width: 90; height: 40; text: "Save draft" }
+    Popup {
+        id: choicePopup; parent: root.contentItem; popupType: Popup.Item
+        x: 240; y: 160; width: 180; height: 65; padding: 5
+        UI.ShellChoice {
+            id: choice; width: 150; model: ["Automatic", "ROCm"]; enabled: false
+            UI.PassiveToolTip { id: choiceTip; target: choice; text: "Start Lemonade first" }
+        }
+    }
     UI.PassiveToolTip { id: saveTip; target: save }
     UI.PassiveToolTip { id: tip; target: button }
     Text { id: info; x: 300; y: 20; width: 160; height: 40; text: "A long informational device name"; elide: Text.ElideRight }
@@ -50,7 +59,7 @@ FloatingWindow {
         input.mouseMove(button, 35, 20);
     }
     function label() { return tip.contentItem.children[0].children[0]; }
-    Timer { interval: 1000; running: true; repeat: true; onTriggered: {
+    Timer { interval: 1100; running: true; repeat: true; onTriggered: {
         try {
             if (stage === 0) {
                 for (let i = 0; i < 100; i++) button.text = "Unhovered dynamic title " + i;
@@ -97,10 +106,17 @@ FloatingWindow {
                 check(tip.visible, "restored text did not show tooltip");
                 check(!label().truncated, "restored short hint was elided");
                 button.enabled = false;
-                check(!tip.visible, "disabled button retained tooltip");
+                input.mouseMove(root.contentItem, 400, 200);
+                input.wait(200);
+                input.mouseMove(button, 35, 20);
+                check(!tip.visible, "disabled button tooltip skipped delay");
+            } else if (stage === 8) {
+                check(tip.visible, "disabled button tooltip missing");
+                input.mouseClick(button, 35, 20);
+                check(root.clicks === 1, "disabled button activated");
                 button.visible = false;
                 check(!tip.visible, "hidden button retained tooltip");
-            } else if (stage === 8) {
+                input.wait(200);
                 input.mouseMove(info, 40, 20);
                 check(!infoTip.visible, "informational tooltip skipped delay");
             } else if (stage === 9) {
@@ -148,6 +164,19 @@ FloatingWindow {
                 root.visible = false;
             } else if (stage === 18) {
                 check(!saveTip.visible && !saveTip.requested, "hidden window retained the focus tooltip");
+                root.visible = true;
+                choicePopup.open();
+            } else if (stage === 19) {
+                check(choice.opacity < 0.6, "disabled choice is not visually distinct");
+                check(disabledField.opacity < 0.6, "disabled input is not visually distinct");
+                input.mouseMove(root.contentItem, 20, 220);
+                input.wait(200);
+                input.mouseMove(choice, 30, 20);
+                check(!choiceTip.visible, "disabled choice tooltip skipped delay");
+            } else if (stage === 20) {
+                check(choiceTip.visible && choiceTip.text === "Start Lemonade first", "disabled choice tooltip missing");
+                input.mouseClick(choice, 30, 20);
+                check(!choice.popup.visible, "disabled choice opened");
                 console.log("PASSIVE_TOOLTIP_PASS"); Qt.quit(); return;
             }
             stage++;

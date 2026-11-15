@@ -10,6 +10,32 @@ from test_assistant_drawer import backend, event_stream
 
 
 class PromptBudgetTests(unittest.TestCase):
+    def test_unloaded_model_uses_lemonades_resolved_context(self):
+        with patch.object(
+            backend,
+            'get_json',
+            side_effect=[{'all_models_loaded': []}, {'resolved_ctx_size': 65536}],
+        ) as get:
+            budget = backend.PromptBudget(
+                'http://localhost:13305',
+                {'id': 'user.model/name', 'target': 'user.model/name'},
+            )
+        self.assertEqual(budget.context, 65536)
+        self.assertEqual(
+            get.call_args.args[0],
+            'http://localhost:13305/v1/models/user.model%2Fname/options',
+        )
+        budget.fit({'messages': [{'role': 'user', 'content': 'x' * 30000}]})
+
+    def test_unavailable_context_estimate_keeps_the_fallback(self):
+        with patch.object(
+            backend, 'get_json', side_effect=[{}, OSError('unavailable')]
+        ):
+            budget = backend.PromptBudget(
+                'http://localhost:13305', {'id': 'local', 'target': 'local'}
+            )
+        self.assertEqual(budget.context, 8192)
+
     def test_image_transport_bytes_do_not_consume_text_context(self):
         with patch.object(backend, 'get_json', return_value={}):
             budget = backend.PromptBudget(

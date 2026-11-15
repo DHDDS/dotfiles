@@ -1,5 +1,6 @@
 {
     "packages": [
-        "extra/lemonade-server"
+        "extra/lemonade-server",
+        "python"
     ]
 }

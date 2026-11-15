@@ -6,6 +6,7 @@ TextField {
     id: root
 
     implicitHeight: Theme.controlHeight + 4
+    opacity: enabled ? 1 : 0.45
     color: Theme.text
     placeholderTextColor: Theme.muted
     selectionColor: Theme.accent
