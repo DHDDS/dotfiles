@@ -219,6 +219,10 @@
                 },
                 {
                     "remote": "flathub",
+                    "app": "com.viber.Viber"
+                },
+                {
+                    "remote": "flathub",
                     "app": "com.rtosta.zapzap"
                 },
                 {
@@ -782,6 +786,11 @@
             {
                 "source": "modules/communication/telegram/files/etc/bash.bashrc.d/telegram.sh",
                 "target": "/etc/bash.bashrc.d/telegram.sh",
+                "mode": "0644"
+            },
+            {
+                "source": "modules/communication/viber/files/etc/bash.bashrc.d/viber.sh",
+                "target": "/etc/bash.bashrc.d/viber.sh",
                 "mode": "0644"
             },
             {
