@@ -98,8 +98,20 @@ class RecordingKeyboard(Keyboard):
 
 class ProfileTests(unittest.TestCase):
     def setUp(self):
-        self.profile = Profile(ActionParser()).load(profile_path)
-        self.profile.compress()
+        class SCCFixture:
+            def load_default_profile(self, mapper=None):
+                profile = Profile(ActionParser()).load(profile_path)
+                profile.compress()
+                (mapper or self.default_mapper).profile = profile
+
+        class ManagedDaemon(controller.GuideChords, SCCFixture):
+            pass
+
+        holder = SimpleNamespace(profile=None)
+        daemon = ManagedDaemon()
+        daemon.default_mapper = holder
+        daemon.load_default_profile()
+        self.profile = holder.profile
         self.clock = Clock()
         self.mapper = Mapper(
             self.profile, self.clock, keyboard=None, mouse=None, gamepad=False
@@ -172,11 +184,11 @@ class ProfileTests(unittest.TestCase):
             ],
         )
 
-    def test_y_switches_workspaces_moves_windows_and_maximizes(self):
-        self.change('Y', True)
+    def test_steam_switches_workspaces_moves_windows_and_maximizes(self):
+        self.change('C', True)
         for name in ('LB', 'RB', 'LGRIP', 'RGRIP', 'LSTICKPRESS'):
             self.tap(name)
-        self.change('Y', False)
+        self.change('C', False)
         self.assertEqual(
             self.mapper.keyboard.presses,
             [
@@ -194,10 +206,10 @@ class ProfileTests(unittest.TestCase):
         )
         self.assertEqual(self.special, [])
 
-    def test_releasing_y_first_releases_the_original_chord(self):
-        self.change('Y', True)
+    def test_releasing_steam_first_releases_the_original_chord(self):
+        self.change('C', True)
         self.change('LGRIP', True)
-        self.change('Y', False)
+        self.change('C', False)
         self.change('LGRIP', False)
         self.assertEqual(len(self.mapper.keyboard.presses), 1)
 
@@ -209,6 +221,64 @@ class ProfileTests(unittest.TestCase):
             [(Keys.KEY_ENTER,), (Keys.KEY_ESC,), (Keys.KEY_SPACE,)],
         )
         self.assertEqual(self.special, ['keyboard'])
+
+    def test_steam_x_opens_keyboard_without_launcher_or_poweroff(self):
+        for release_order in (('X', 'C'), ('C', 'X')):
+            with self.subTest(release_order=release_order):
+                self.mapper.keyboard.presses.clear()
+                self.special.clear()
+                self.change('C', True)
+                self.change('X', True)
+                self.clock.advance(1.6, self.mapper)
+                for name in release_order:
+                    self.change(name, False)
+                self.clock.advance(0.1, self.mapper)
+                self.assertEqual(self.special, ['keyboard'])
+                self.assertEqual(self.mapper.keyboard.presses, [])
+        self.tap('C')
+        self.assertEqual(self.mapper.keyboard.presses, [(Keys.KEY_LEFTMETA, Keys.KEY_R)])
+
+    def test_steam_b_closes_window_and_steam_y_toggles_dictation(self):
+        self.change('C', True)
+        for name in ('B', 'Y'):
+            self.tap(name)
+        self.change('C', False)
+        self.clock.advance(0.1, self.mapper)
+        self.assertEqual(
+            self.mapper.keyboard.presses,
+            [(Keys.KEY_LEFTMETA, Keys.KEY_Q),
+             (Keys.KEY_LEFTMETA, Keys.KEY_LEFTSHIFT, Keys.KEY_D)],
+        )
+        self.assertEqual(self.special, [])
+
+    def test_releasing_steam_before_new_chord_releases_keys(self):
+        for button in ('B', 'Y'):
+            self.change('C', True)
+            self.change(button, True)
+            self.change('C', False)
+            self.change(button, False)
+        self.clock.advance(0.1, self.mapper)
+        self.assertEqual(len(self.mapper.keyboard.presses), 2)
+
+    def test_simultaneous_steam_and_grip_does_not_launch(self):
+        self.mapper.buttons = SCButtons.C | SCButtons.LGRIP
+        # SCC visits LGRIP before C when both arrive in one input report.
+        self.profile.buttons[SCButtons.LGRIP].button_press(self.mapper)
+        self.profile.buttons[SCButtons.C].button_press(self.mapper)
+        self.mapper.generate_events()
+        self.change('LGRIP', False)
+        self.change('C', False)
+        self.clock.advance(1.6, self.mapper)
+        self.assertEqual(self.special, [])
+        self.assertEqual(
+            self.mapper.keyboard.presses,
+            [(Keys.KEY_LEFTMETA, Keys.KEY_LEFTCTRL, Keys.KEY_LEFTSHIFT, Keys.KEY_UP)],
+        )
+
+    def test_y_alone_does_nothing(self):
+        self.tap('Y')
+        self.assertEqual(self.mapper.keyboard.presses, [])
+        self.assertEqual(self.special, [])
 
     def test_mouse_buttons_use_supported_outputs(self):
         for name in ('LPAD', 'RPAD'):
@@ -254,14 +324,14 @@ class ProfileTests(unittest.TestCase):
                 self.stick(0, 0)
                 self.assertFalse(self.mapper.keyboard.held)
 
-    def test_y_stick_selects_controls_and_cleans_up_on_mode_release(self):
-        self.change('Y', True)
+    def test_steam_stick_selects_controls_and_cleans_up_on_mode_release(self):
+        self.change('C', True)
         self.stick(-32768, 0)
         self.assertEqual(self.mapper.keyboard.held, {Keys.KEY_LEFTMETA, Keys.KEY_F9})
         self.stick(0, 0)
         self.stick(32767, 900)
         self.assertEqual(self.mapper.keyboard.held, {Keys.KEY_LEFTMETA, Keys.KEY_F10})
-        self.change('Y', False)
+        self.change('C', False)
         self.stick(32767, 0)
         self.assertEqual(self.mapper.keyboard.held, {Keys.KEY_RIGHT})
         self.stick(0, 0)

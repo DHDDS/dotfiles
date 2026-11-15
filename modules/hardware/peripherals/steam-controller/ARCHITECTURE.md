@@ -45,18 +45,20 @@ cycles primary tabs in the active Space, traverses focus in another shell
 surface, or dispatches focus-left/right, center and the layout-change event when
 the desktop is active. Ordinary Super+Left/Right keyboard bindings remain native.
 Grips emit Super+LeftBrace/RightBrace for the configured width
-steps. Holding physical Y selects SCC modes without emitting a modifier key of
-its own: bumpers use Super+Ctrl+Up/Down for workspaces, grips add Shift to move a
-window and follow, and stick-click emits Super+M to toggle maximize. Normal
-stick-click opens SCC's keyboard. A/B/X emit Enter/Escape/Space. Mode actions
-release their selected keys even when Y is released before the action button.
+steps. Holding Steam selects SCC modes: bumpers use Super+Ctrl+Up/Down for
+workspaces, grips add Shift to move a window and follow, stick-click emits
+Super+M to toggle maximize, B emits Super+Q to close the focused window, and Y
+emits Super+Shift+D for the Capture speech toggle. Normal stick-click and
+Steam+X open SCC's on-demand keyboard. A/B/X emit Enter/Escape/Space; Y alone
+is unbound. Mode actions release their selected keys even when Steam is released
+before the action button.
 
 The stick uses a radial ROUND deadzone: values below 6000 are neutral, while
 over-range full deflection is clamped instead of converted to neutral. This
 preserves a held arrow at the negative axis endpoint and with transverse jitter.
-Holding Y changes horizontal stick motion to Super+F9/F10. Quickshell's active
-`InteractionWindow` consumes these as previous/next focus; elsewhere they have no
-desktop binding. Shell input navigation is described in the
+Holding Steam changes horizontal stick motion to Super+F9/F10. Quickshell's
+active `InteractionWindow` consumes these as previous/next focus; elsewhere they
+have no desktop binding. Shell input navigation is described in the
 [shared UI architecture](../../../desktop/quickshell/ARCHITECTURE.md#shared-ui).
 
 Trackpads retain SCC's smoothing and haptics. Both left-pad scroll axes have
@@ -64,7 +66,14 @@ negative sensitivity, reversing the normal SCC directions. Right-pad click and
 right trigger both emit left click; left trigger emits right click and left-pad
 click emits middle click. Gyro is intentionally unbound. The Steam button's long
 hold switches off wireless controllers; upstream ignores that operation for a
-wired controller, and the long hold does not emit the launch shortcut.
+wired controller, and the long hold does not emit the launch shortcut. The
+managed daemon wraps the loaded profile's Steam mode and hold actions so any
+selected Steam chord cancels the pending tap/hold timer; this also handles
+simultaneous button reports and prevents an unintended launcher or power-off.
+SCC runs its OSD helper with the mapper, but creates the keyboard and its input
+device only when requested; the keyboard closes on controller disconnect or
+mapper shutdown. Apply copies changed assets but does not restart a running
+user service, so restart `steam-controller-desktop.service` to load them.
 
 Steam owns its native desktop, chord and game profiles while running. There is
 no automatic VDF conversion or modification of Steam account/cloud files. This
@@ -74,7 +83,7 @@ keeps guide-button and per-game behavior native, as selected by the user.
 
 `tests/test_steam_controller.py` checks Steam ownership transitions, shutdown and
 crash handling with fake processes. Native SCC checks exercise the profile's
-button events, keyboard chord order, Y-mode selection/release, long holds, mouse
+button events, keyboard chord order, Steam-mode selection/release, long holds, mouse
 outputs and scroll direction using recording devices without host input access.
 The recording keyboard uses SCC's real `Keyboard.pressEvent/releaseEvent` scan
 translation, with only low-level output stubbed. This catches unsupported keys

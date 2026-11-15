@@ -34,6 +34,69 @@ class ExitOnMapperFailure:
                 raise SystemExit(1)
 
 
+def configure_guide_modes(profile):
+    """Consume a pending guide tap/hold when a guide mode is selected."""
+    from scc.constants import SCButtons
+    from scc.modifiers import HoldModifier, ModeModifier
+
+    class GuideHold(HoldModifier):
+        consumed = False
+
+        def consume(self, mapper):
+            self.consumed = True
+            if self.waiting_task is not None:
+                mapper.cancel_task(self.waiting_task)
+                self.waiting_task = None
+
+        def button_press(self, mapper):
+            if not self.consumed:
+                super().button_press(mapper)
+
+        def button_release(self, mapper):
+            if self.consumed:
+                self.consumed = False
+                if self.active is not None:
+                    super().button_release(mapper)
+            else:
+                super().button_release(mapper)
+
+    guide = profile.buttons[SCButtons.C]
+    if type(guide) is not HoldModifier:
+        raise ValueError('Steam button must use the hold action')
+    guide.__class__ = GuideHold
+
+    class GuideMode(ModeModifier):
+        def consume(self, mapper, selected):
+            if mapper.is_pressed(SCButtons.C) and selected is self.mods[SCButtons.C]:
+                mapper.profile.buttons[SCButtons.C].consume(mapper)
+
+        def select(self, mapper):
+            selected = super().select(mapper)
+            self.consume(mapper, selected)
+            return selected
+
+        def select_w_check(self, mapper):
+            check, selected = super().select_w_check(mapper)
+            self.consume(mapper, selected)
+            return check, selected
+
+    for action in profile.get_all_actions():
+        if type(action) is ModeModifier and SCButtons.C in action.mods:
+            action.__class__ = GuideMode
+
+
+class GuideChords:
+    def load_default_profile(self, mapper=None):
+        super().load_default_profile(mapper)
+        mapper = mapper or self.default_mapper
+        configure_guide_modes(mapper.profile)
+
+    def _set_profile(self, mapper, filename):
+        super()._set_profile(mapper, filename)
+        if filename == PROFILE:
+            configure_guide_modes(mapper.profile)
+
+
 def run_mapper():
     from scc.paths import get_daemon_socket, get_pid_file
     from scc.sccdaemon import SCCDaemon
@@ -41,7 +104,7 @@ def run_mapper():
 
     init_logging()
 
-    class ManagedDaemon(ExitOnMapperFailure, SCCDaemon):
+    class ManagedDaemon(ExitOnMapperFailure, GuideChords, SCCDaemon):
         pass
 
     daemon = ManagedDaemon(get_pid_file(), get_daemon_socket())
