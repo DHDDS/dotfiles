@@ -35,6 +35,7 @@ bind(mainMod .. " + M", hl.dsp.window.fullscreen({ mode = "maximized", action = 
 -- Hypridle answers lock-session by starting hyprlock.
 bind(mainMod .. " + L", hl.dsp.exec_cmd("loginctl lock-session"), "Lock screen")
 bind(mainMod .. " + V", hl.dsp.window.float({ action = "toggle" }), "Toggle floating window")
+bind(mainMod .. " + SHIFT + V", app("human-type --clipboard --delay 0.5"), "Type clipboard text")
 bind(mainMod .. " + R", hl.dsp.global("desktop:launcher"), "Open application search")
 bind(mainMod .. " + 1", hl.dsp.global("desktop:spaces"), "Open Spaces")
 bind("SHIFT + TAB", hl.dsp.global("desktop:spaces"), "Open Spaces")

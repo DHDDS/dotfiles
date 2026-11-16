@@ -98,6 +98,11 @@ session recovery, not a clean native compositor shutdown.
 
 ## Desktop integration
 
+`human-type` sends each character through `wtype` with randomized pauses at a
+fixed speed multiplier of 5. Its clipboard mode reads text with `wl-paste` before
+the optional delay, preserving whitespace. Win+Shift+V starts it through UWSM
+with a short delay so the shortcut modifiers can be released first.
+
 `workspaces.lua` owns navigation policy for shortcuts, gestures and the bar.
 Shortcuts use the active monitor; bar buttons pass their output's numeric monitor
 ID, resolved against `hl.get_monitors()`. Native monitor selectors, in

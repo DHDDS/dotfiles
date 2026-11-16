@@ -849,6 +849,11 @@
                 "mode": "0755"
             },
             {
+                "source": "modules/desktop/hyprland/files/usr/local/bin/human-type",
+                "target": "/usr/local/bin/human-type",
+                "mode": "0755"
+            },
+            {
                 "source": "modules/desktop/hyprland/files/usr/local/bin/session-mode",
                 "target": "/usr/local/bin/session-mode",
                 "mode": "0755"
@@ -4008,6 +4013,7 @@
         "xdg-desktop-portal-gtk",
         "playerctl",
         "wl-clipboard",
+        "wtype",
         "libnotify",
         "quickshell",
         "ripgrep",

@@ -13,7 +13,8 @@
         "xdg-desktop-portal-hyprland",
         "xdg-desktop-portal-gtk",
         "playerctl",
-        "wl-clipboard"
+        "wl-clipboard",
+        "wtype"
     ],
     "services": [
         "getty@tty1.service"

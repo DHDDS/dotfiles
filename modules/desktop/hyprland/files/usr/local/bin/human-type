@@ -1,0 +1,54 @@
+#!/usr/bin/env python3
+"""Type text with randomized pauses through the Wayland virtual keyboard."""
+
+import argparse
+import random
+import subprocess
+import sys
+import time
+
+
+def type_text(text):
+    for char in text:
+        subprocess.run(['wtype', '--', char], check=True)
+        delay = random.uniform(0.06, 0.18)
+        if char == ' ':
+            delay += random.uniform(0.05, 0.15)
+        if char in '.!?':
+            delay += random.uniform(0.2, 0.6)
+        time.sleep(delay / 5)
+
+
+def main():
+    parser = argparse.ArgumentParser(description='Type text with natural pauses.')
+    parser.add_argument('-d', '--delay', type=float, default=0,
+                        help='Seconds to wait before typing (default: 0)')
+    parser.add_argument('--clipboard', action='store_true',
+                        help='Type the current text clipboard')
+    parser.add_argument('text', nargs='*', help='Text to type')
+    args = parser.parse_args()
+    if args.delay < 0:
+        parser.error('--delay cannot be negative')
+    if args.clipboard == bool(args.text):
+        parser.error('provide text or --clipboard')
+
+    try:
+        text = (subprocess.run(['wl-paste', '--no-newline', '--type', 'text'],
+                               check=True, capture_output=True).stdout.decode('utf-8')
+                if args.clipboard else ' '.join(args.text))
+        time.sleep(args.delay)
+        type_text(text)
+    except (OSError, UnicodeError, subprocess.CalledProcessError) as error:
+        print(f'human-type: {error}', file=sys.stderr)
+        if args.clipboard:
+            try:
+                subprocess.run(['notify-send', 'Human type', 'Could not type clipboard text.'],
+                               check=False)
+            except OSError:
+                pass
+        return 1
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

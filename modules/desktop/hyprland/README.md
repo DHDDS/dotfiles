@@ -12,6 +12,10 @@ column to the first. Win+Left/Right also wrap between columns.
 
 The first click on an inactive window only focuses it; click again to interact.
 
+`human-type 'text to type'` types text with natural pauses. Use `--delay 3` to
+allow time to focus the target. Win+Shift+V types the current text clipboard into
+the focused field; release the shortcut keys promptly before typing begins.
+
 ## Desktop and gaming mode
 
 The desktop starts automatically on TTY1. Win+1 or Shift+Tab opens Spaces; hold
