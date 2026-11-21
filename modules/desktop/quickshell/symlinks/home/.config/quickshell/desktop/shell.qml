@@ -5,6 +5,7 @@ import Quickshell
 import Quickshell.Hyprland
 import Quickshell.Services.SystemTray
 import "ui"
+import "ui/DesktopContext.js" as DesktopContext
 import "spaces/pictures"
 import "bar"
 import "launcher"
@@ -22,7 +23,19 @@ ShellRoot {
     // Register the tray host for the session, including while its drawer is closed.
     readonly property var systemTray: SystemTray
 
-    AssistantInbox {}
+    AssistantInbox {
+        openDrawer: (key, output) => root.openAssistantDrawer(key, output)
+        publishPresence: true
+    }
+    SpaceInbox {}
+
+    function openAssistantDrawer(key: string, outputName: string): bool {
+        const output = Quickshell.screens.find(screen => screen.name === outputName) ?? drawers.focusedOutput() ?? Quickshell.screens[0];
+        if (!output)
+            return false;
+        drawers.openDrawer(key, output);
+        return true;
+    }
 
     InteractionState {
         id: interactions
@@ -34,6 +47,10 @@ ShellRoot {
     Drawers {
         id: drawers
         interactionState: interactions
+        onDrawerOpening: key => {
+            if (key === "assistant")
+                AssistantService.desktopContext = DesktopContext.capture(Hyprland);
+        }
     }
     SpaceHost {
         id: spaceHost
@@ -98,6 +115,12 @@ ShellRoot {
         function onHideRequested(): void {
             drawers.dismiss();
             launcher.dismiss();
+        }
+    }
+    Connections {
+        target: AssistantService
+        function onDesktopDrawerRequested(key: string): void {
+            root.openAssistantDrawer(key, "");
         }
     }
     Binding {

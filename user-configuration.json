@@ -1792,6 +1792,54 @@
                 "target": "home/.config/quickshell/desktop/bar/WorkspaceList.qml"
             },
             {
+                "source": "modules/desktop/quickshell/symlinks/home/.config/quickshell/desktop/companion/ApprovalCard.qml",
+                "target": "home/.config/quickshell/desktop/companion/ApprovalCard.qml"
+            },
+            {
+                "source": "modules/desktop/quickshell/symlinks/home/.config/quickshell/desktop/companion/Character.qml",
+                "target": "home/.config/quickshell/desktop/companion/Character.qml"
+            },
+            {
+                "source": "modules/desktop/quickshell/symlinks/home/.config/quickshell/desktop/companion/Companion.qml",
+                "target": "home/.config/quickshell/desktop/companion/Companion.qml"
+            },
+            {
+                "source": "modules/desktop/quickshell/symlinks/home/.config/quickshell/desktop/companion/CompanionWindow.qml",
+                "target": "home/.config/quickshell/desktop/companion/CompanionWindow.qml"
+            },
+            {
+                "source": "modules/desktop/quickshell/symlinks/home/.config/quickshell/desktop/companion/Composer.qml",
+                "target": "home/.config/quickshell/desktop/companion/Composer.qml"
+            },
+            {
+                "source": "modules/desktop/quickshell/symlinks/home/.config/quickshell/desktop/companion/DetailsCard.qml",
+                "target": "home/.config/quickshell/desktop/companion/DetailsCard.qml"
+            },
+            {
+                "source": "modules/desktop/quickshell/symlinks/home/.config/quickshell/desktop/companion/Emotes.qml",
+                "target": "home/.config/quickshell/desktop/companion/Emotes.qml"
+            },
+            {
+                "source": "modules/desktop/quickshell/symlinks/home/.config/quickshell/desktop/companion/Phrases.js",
+                "target": "home/.config/quickshell/desktop/companion/Phrases.js"
+            },
+            {
+                "source": "modules/desktop/quickshell/symlinks/home/.config/quickshell/desktop/companion/Puppet.qml",
+                "target": "home/.config/quickshell/desktop/companion/Puppet.qml"
+            },
+            {
+                "source": "modules/desktop/quickshell/symlinks/home/.config/quickshell/desktop/companion/behaviors.json",
+                "target": "home/.config/quickshell/desktop/companion/behaviors.json"
+            },
+            {
+                "source": "modules/desktop/quickshell/symlinks/home/.config/quickshell/desktop/companion/companion.py",
+                "target": "home/.config/quickshell/desktop/companion/companion.py"
+            },
+            {
+                "source": "modules/desktop/quickshell/symlinks/home/.config/quickshell/desktop/companion.qml",
+                "target": "home/.config/quickshell/desktop/companion.qml"
+            },
+            {
                 "source": "modules/desktop/quickshell/symlinks/home/.config/quickshell/desktop/drawers/AssistantDrawer.qml",
                 "target": "home/.config/quickshell/desktop/drawers/AssistantDrawer.qml"
             },
@@ -1882,6 +1930,10 @@
             {
                 "source": "modules/desktop/quickshell/symlinks/home/.config/quickshell/desktop/drawers/assistant/AttachmentStrip.qml",
                 "target": "home/.config/quickshell/desktop/drawers/assistant/AttachmentStrip.qml"
+            },
+            {
+                "source": "modules/desktop/quickshell/symlinks/home/.config/quickshell/desktop/drawers/assistant/DesktopActions.qml",
+                "target": "home/.config/quickshell/desktop/drawers/assistant/DesktopActions.qml"
             },
             {
                 "source": "modules/desktop/quickshell/symlinks/home/.config/quickshell/desktop/drawers/assistant/Markdown.js",
@@ -3676,6 +3728,10 @@
                 "target": "home/.config/quickshell/desktop/ui/Card.qml"
             },
             {
+                "source": "modules/desktop/quickshell/symlinks/home/.config/quickshell/desktop/ui/DesktopContext.js",
+                "target": "home/.config/quickshell/desktop/ui/DesktopContext.js"
+            },
+            {
                 "source": "modules/desktop/quickshell/symlinks/home/.config/quickshell/desktop/ui/DrawerActionButton.qml",
                 "target": "home/.config/quickshell/desktop/ui/DrawerActionButton.qml"
             },
@@ -3792,6 +3848,10 @@
                 "target": "home/.config/quickshell/desktop/ui/SpaceHost.qml"
             },
             {
+                "source": "modules/desktop/quickshell/symlinks/home/.config/quickshell/desktop/ui/SpaceInbox.qml",
+                "target": "home/.config/quickshell/desktop/ui/SpaceInbox.qml"
+            },
+            {
                 "source": "modules/desktop/quickshell/symlinks/home/.config/quickshell/desktop/ui/SpaceOpenRequest.qml",
                 "target": "home/.config/quickshell/desktop/ui/SpaceOpenRequest.qml"
             },
@@ -3854,6 +3914,18 @@
             {
                 "source": "modules/desktop/quickshell/symlinks/home/.local/bin/desktop-browser-kiosk",
                 "target": "home/.local/bin/desktop-browser-kiosk"
+            },
+            {
+                "source": "modules/desktop/quickshell/symlinks/home/.local/bin/desktop-companion",
+                "target": "home/.local/bin/desktop-companion"
+            },
+            {
+                "source": "modules/desktop/quickshell/symlinks/home/.local/share/applications/desktop-companion.desktop",
+                "target": "home/.local/share/applications/desktop-companion.desktop"
+            },
+            {
+                "source": "modules/desktop/quickshell/symlinks/home/.local/share/icons/hicolor/scalable/apps/desktop-companion.svg",
+                "target": "home/.local/share/icons/hicolor/scalable/apps/desktop-companion.svg"
             },
             {
                 "source": "modules/desktop/quickshell/symlinks/home/.local/share/kpackage/Purpose/desktop-assistant-context/contents/code/main.sh",

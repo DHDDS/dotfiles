@@ -53,6 +53,8 @@ bind(mainMod .. " + CTRL + PRINT", app("desktop-screenshot window"), "Select win
 bind("SHIFT + PRINT", app("desktop-screenshot output"), "Capture current display")
 bind(mainMod .. " + SHIFT + R", hl.dsp.global("desktop:record-region"), "Start or stop area recording")
 bind(mainMod .. " + SHIFT + D", hl.dsp.global("desktop:dictation"), "Start or finish dictation")
+bind(mainMod .. " + SPACE", hl.dsp.global("companion:talk"), "Talk to the companion (tap: hands-free, hold: push to talk)")
+bind(mainMod .. " + SHIFT + SPACE", hl.dsp.global("companion:type"), "Type a message to the companion")
 bind(mainMod .. " + period", layoutAction(hl.dsp.layout("center")), "Center current column")
 bind(mainMod .. " + J", layoutAction(hl.dsp.layout("promote")), "Promote stacked window to its own column")
 bind(mainMod .. " + bracketright", layoutAction(hl.dsp.layout("colresize +conf")), "Widen current column")

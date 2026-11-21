@@ -1,5 +1,6 @@
 singleton AssistantService 1.0 AssistantService.qml
 AssistantInbox 1.0 AssistantInbox.qml
+DesktopActions 1.0 DesktopActions.qml
 ModelPicker 1.0 ModelPicker.qml
 AttachmentStrip 1.0 AttachmentStrip.qml
 ToolActivity 1.0 ToolActivity.qml

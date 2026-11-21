@@ -216,7 +216,7 @@ def run_qml(test, body, setup=None, *, isolate_bus=False, entrypoint='shell.qml'
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         copy_theme_ui(root)
-        for name in ('icons', 'drawers', 'integrations', 'spaces'):
+        for name in ('icons', 'drawers', 'integrations', 'spaces', 'launcher'):
             shutil.copytree(DESKTOP / name, root / name)
         (root / 'runtime').mkdir(mode=0o700)
         config = root / 'config/quickshell/desktop'

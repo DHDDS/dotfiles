@@ -15,9 +15,26 @@ ColumnLayout {
     readonly property bool detailsExpanded: showDetails || (approvalPending && !approvalCollapsed)
     readonly property var args: activity.arguments || ({})
     readonly property var result: activity.result || ({})
+    readonly property string desktopDrawer: args.action === "open" ? "" : ({
+            microphone: "microphone",
+            timer: "weather",
+            agenda: "events"
+        })[activity.name] ?? ""
     readonly property bool approvalPending: activity.state === "pending_approval"
     readonly property string title: {
         switch (activity.name) {
+        case "timer":
+            return qsTr("Desktop timers");
+        case "window":
+            return args.action === "move" ? qsTr("Move window") : args.action === "focus" ? qsTr("Focus window") : qsTr("Desktop windows");
+        case "agenda":
+            return qsTr("Today's calendar");
+        case "lid_policy":
+            return qsTr("Laptop lid policy");
+        case "open_app":
+            return qsTr("Open application");
+        case "microphone":
+            return args.action === "select" ? qsTr("Switch default microphone") : args.action === "open" ? qsTr("Open microphone settings") : qsTr("Check microphones");
         case "search_spaces":
             return qsTr("Search Spaces · %1").arg(args.kind || "");
         case "space_filters":
@@ -93,6 +110,22 @@ ColumnLayout {
     }
     readonly property string resultText: {
         const parts = [];
+        if (activity.name === "microphone" && Array.isArray(result.inputs)) {
+            for (const input of result.inputs) {
+                const info = [input.label];
+                if (input.active)
+                    info.push(qsTr("Default"));
+                if (input.muted)
+                    info.push(qsTr("Muted"));
+                if (typeof input.level === "number")
+                    info.push(qsTr("%1% input gain").arg(input.level));
+                parts.push(info.join(" · "));
+            }
+        }
+        if (activity.name === "agenda" && Array.isArray(result.events))
+            parts.push(...result.events.map(event => [event.title, event.all_day ? qsTr("All day") : event.start, event.location].filter(Boolean).join(" · ")));
+        if (["timer", "window", "lid_policy"].includes(activity.name))
+            parts.push(JSON.stringify(result, null, 2));
         if (result.stdout)
             parts.push("stdout:\n" + result.stdout);
         if (result.stderr)
@@ -144,6 +177,17 @@ ColumnLayout {
             if (root.approvalPending)
                 root.approvalCollapsed = !expand;
         }
+    }
+    ShellButton {
+        objectName: root.desktopDrawer === "microphone" ? "assistantOpenMicrophone" : "assistantOpenDesktopDrawer:" + root.desktopDrawer
+        visible: !!root.desktopDrawer && ["completed", "failed"].includes(root.activity.state)
+        enabled: root.active
+        text: ({
+                microphone: qsTr("Open microphone settings"),
+                weather: qsTr("Open clock and timers"),
+                events: qsTr("Open calendar")
+            })[root.desktopDrawer] ?? ""
+        onClicked: AssistantService.desktopDrawerRequested(root.desktopDrawer)
     }
     Repeater {
         model: root.activity.name === "present_space_results" || (["search_spaces", "search_lyrics"].includes(root.activity.name) && root.result.display !== false) ? root.result.items || [] : []

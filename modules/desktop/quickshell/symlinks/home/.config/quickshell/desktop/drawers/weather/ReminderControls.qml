@@ -9,7 +9,7 @@ ColumnLayout {
     property var service: ReminderService
     property bool active: false
     readonly property var focusEntry: service.entries.find(entry => entry.kind === "pomodoro") ?? null
-    readonly property var reminders: service.entries.filter(entry => entry.kind === "alarm")
+    readonly property var reminders: service.entries.filter(entry => entry.kind === "alarm" || entry.kind === "timer")
     readonly property bool popupOpen: focusEditor.visible || reminderEditor.visible
     signal popupOpened
     spacing: 16
@@ -253,13 +253,13 @@ ColumnLayout {
                     Layout.fillWidth: true
                     spacing: 0
                     ShellText {
-                        text: reminder.modelData.message || qsTr("Reminder")
+                        text: reminder.modelData.message || (reminder.modelData.kind === "timer" ? qsTr("Timer") : qsTr("Reminder"))
                         Layout.fillWidth: true
                         elide: Text.ElideRight
                     }
                     Note {
                         objectName: "reminderStatus:" + reminder.modelData.id
-                        text: root.service.dueLabel(reminder.modelData.deadline)
+                        text: reminder.modelData.kind === "timer" ? root.service.remaining(reminder.modelData) : root.service.dueLabel(reminder.modelData.deadline)
                     }
                 }
                 IconButton {

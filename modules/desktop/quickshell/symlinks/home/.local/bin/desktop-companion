@@ -1,0 +1,21 @@
+#!/bin/sh
+# Start the desktop companion, or talk to the one that is already running:
+#   desktop-companion            start it, or say goodbye when it is running
+#   desktop-companion BEHAVIOUR  start with, or switch to, a behaviour
+#   desktop-companion quit       say goodbye
+config="${XDG_CONFIG_HOME:-$HOME/.config}/quickshell/desktop/companion.qml"
+
+call() {
+    qs ipc --path "$config" call companion "$@"
+}
+
+if call status > /dev/null 2>&1; then
+    case "${1:-}" in
+        "" | quit) call quit ;;
+        *) call behavior "$1" ;;
+    esac
+    exit
+fi
+[ "${1:-}" = quit ] && exit 0
+export COMPANION_BEHAVIOR="${1:-}"
+exec qs --no-duplicate --path "$config"

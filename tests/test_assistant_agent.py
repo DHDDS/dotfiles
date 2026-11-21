@@ -47,6 +47,89 @@ def tool_stream(*calls, finish='tool_calls', done=True):
 
 
 class AssistantAgentTests(unittest.TestCase):
+    def test_window_move_reports_success_only_after_compositor_readback(self):
+        origin = {'window': {'id': 'aa01', 'app': 'editor', 'pid': 20}}
+        args = {'action': 'move', 'target': 'current', 'monitor': 'other'}
+        with (
+            patch.object(
+                backend,
+                'desktop_ipc',
+                side_effect=[
+                    {'requested': True, 'id': 'aa01', 'monitor': 'DP-1'},
+                    {'window': {'monitor': 'eDP-1'}},
+                    {'window': {'monitor': 'DP-1'}},
+                ],
+            ) as ipc,
+            patch.object(backend.time, 'sleep'),
+        ):
+            result = backend.execute_tool('window', args, origin)
+        self.assertTrue(result['confirmed'])
+        self.assertEqual(
+            ipc.call_args_list[0].args,
+            (
+                'desktop',
+                {
+                    'tool': 'window',
+                    'args': args,
+                    'context': origin,
+                },
+            ),
+        )
+        self.assertEqual(
+            ipc.call_args_list[-1].args[1]['args'], {'action': 'observe', 'id': 'aa01'}
+        )
+        with self.assertRaises(ValueError):
+            backend.normalize_tool('window', {'action': 'observe', 'target': 'aa01'})
+
+    def test_microphone_switch_requires_a_live_default_readback(self):
+        selected = {'id': '22', 'label': 'USB microphone', 'muted': False}
+        with (
+            patch.object(
+                backend,
+                'microphone_ipc',
+                side_effect=[
+                    {'requested': True},
+                    {'active': None},
+                    {'active': selected},
+                ],
+            ) as ipc,
+            patch.object(backend.time, 'sleep'),
+        ):
+            result = backend.execute_tool(
+                'microphone', {'action': 'select', 'id': '22'}
+            )
+        self.assertEqual(result, {'active': selected, 'confirmed': True})
+        self.assertEqual(
+            [call.args[0] for call in ipc.call_args_list],
+            [
+                {'action': 'select', 'id': '22'},
+                {'action': 'status'},
+                {'action': 'status'},
+            ],
+        )
+        with (
+            patch.object(
+                backend,
+                'microphone_ipc',
+                side_effect=[
+                    {'requested': True},
+                    {'active': {'id': '11', 'label': 'Internal microphone'}},
+                ],
+            ),
+            patch.object(backend.time, 'monotonic', side_effect=[0, 3]),
+        ):
+            result = backend.execute_tool(
+                'microphone', {'action': 'select', 'id': '22'}
+            )
+        self.assertNotIn('confirmed', result)
+        self.assertIn('could not be confirmed', result['error'])
+        for args in (
+            {'action': 'select', 'id': 'USB microphone'},
+            {'action': 'open', 'id': '22'},
+        ):
+            with self.assertRaises(ValueError):
+                backend.normalize_tool('microphone', args)
+
     def test_stream_batching_preserves_reasoning_and_text_phase_order(self):
         stream = event_stream(
             [

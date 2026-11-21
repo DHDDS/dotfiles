@@ -28,6 +28,7 @@ InteractionWindow {
     // false during handoff to closing, which would destroy/recreate lazy content.
     readonly property bool keepVisible: slideProgress > 0 && (interactionState.activeSurface === null || interactionState.activeSurface === root) && Quickshell.screens.includes(presentationScreen)
     property ShellScreen presentationScreen: null
+    signal drawerOpening(string key)
 
     targetScreen: opened ? interactionState.screen : keepVisible ? presentationScreen : null
     visible: (opened || keepVisible) && targetScreen !== null
@@ -56,6 +57,8 @@ InteractionWindow {
         const entry = definition(key);
         if (!entry)
             return;
+        if (!opened || currentDrawer !== entry || interactionState.screen !== output)
+            drawerOpening(key);
         if (currentDrawer !== entry || (presentationScreen && presentationScreen !== output)) {
             dismiss();
             resetPresentation();

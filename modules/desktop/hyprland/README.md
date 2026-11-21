@@ -79,6 +79,8 @@ automatic handoff when Steam starts.
 | Shift+Print          | Capture the current display         |
 | Win+Shift+R          | Record an area / stop recording      |
 | Win+Shift+D          | Start / finish local dictation       |
+| Win+Space            | Talk to Pip (tap / hold)             |
+| Win+Shift+Space      | Type a message to Pip                |
 
 Screenshots are saved under your Pictures directory in `Screenshots` and copied
 to the clipboard before the editor opens. While selecting an area, hold Space

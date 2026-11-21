@@ -30,6 +30,7 @@ Singleton {
     property string responseStyle: "default"
     property var preferredThinking: ({})
     property string draft: ""
+    property var desktopContext: ({})
     property string responseLength: "brief"
     property string preferredModel: ""
     property bool preferencesReady: false
@@ -76,6 +77,7 @@ Singleton {
     signal appOpened
     signal modelInstalled(string id)
     signal pasted(int cursor)
+    signal desktopDrawerRequested(string key)
 
     ListModel {
         id: history
@@ -195,7 +197,12 @@ Singleton {
     function refreshBackends(): void {
         if (!online || checking || generating)
             return;
-        request({op: "status", generation: catalogueGeneration, aliases: catalogueAliases, need_backends: true});
+        request({
+            op: "status",
+            generation: catalogueGeneration,
+            aliases: catalogueAliases,
+            need_backends: true
+        });
     }
     function connect(): void {
         if (!busy)
@@ -336,7 +343,7 @@ Singleton {
         sendText(prompt, attachments);
         return true;
     }
-    function sendText(prompt: string, files): void {
+    function appendUserMessage(prompt: string, files): void {
         history.append({
             speaker: "user",
             body: prompt,
@@ -349,10 +356,99 @@ Singleton {
             toolContextJson: "[]",
             toolActivitiesJson: "[]"
         });
+    }
+    function sendText(prompt: string, files): void {
+        appendUserMessage(prompt, files);
         if (draft === prompt || !draft.trim())
             draft = "";
         attachments = attachments.filter(item => !files.some(sent => sent.id === item.id));
         beginReply();
+    }
+    function handoffFields(value, depth) {
+        if (depth > 16)
+            return null;
+        if (Array.isArray(value))
+            return value.map(item => handoffFields(item, depth + 1));
+        if (!value || typeof value !== "object")
+            return value;
+        const result = {};
+        for (const key of Object.keys(value))
+            if (!["command", "actions", "__proto__", "constructor", "prototype"].includes(key))
+                result[key] = handoffFields(value[key], depth + 1);
+        return result;
+    }
+
+    function importCompanionReply(reply: var): string {
+        for (let index = 0; index < history.count; index++)
+            if (history.get(index).companionReplyId === reply.id)
+                return "";
+        if (busy)
+            return qsTr("Wait for the current Assistant request to finish.");
+        if (history.count + 2 > 80)
+            return qsTr("Start a new Assistant chat before continuing Pip's answer.");
+
+        const activities = [];
+        const context = [];
+        const names = ["timer", "window", "open_app", "agenda", "lid_policy", "microphone", "search_spaces", "search_lyrics", "get_song_lyrics", "space_filters", "web_search", "read_web_page"];
+        const records = Array.isArray(reply.results) ? reply.results.slice(0, 12) : [];
+        for (const record of records) {
+            if (!names.includes(record?.name) || !record.result || typeof record.result !== "object" || Array.isArray(record.result))
+                continue;
+            const id = "pip_" + reply.id + "_" + activities.length;
+            const args = handoffFields(record.args ?? {}, 0);
+            const result = handoffFields(record.result, 0);
+            for (const key of ["entries", "items", "inputs", "events", "timers", "candidates", "windows", "outputs", "inhibitors"])
+                result[key] = Array.isArray(result[key]) ? result[key].filter(item => item && typeof item === "object" && !Array.isArray(item)) : undefined;
+            activities.push({
+                id,
+                name: record.name,
+                state: result.error ? "failed" : "completed",
+                arguments: args,
+                result,
+                bodyOffset: 0,
+                order: activities.length
+            });
+            context.push({
+                role: "assistant",
+                content: null,
+                tool_calls: [
+                    {
+                        id,
+                        type: "function",
+                        function: {
+                            name: record.name,
+                            arguments: JSON.stringify(args)
+                        }
+                    }
+                ]
+            }, {
+                role: "tool",
+                tool_call_id: id,
+                content: JSON.stringify({
+                    untrusted_tool_result: result
+                })
+            });
+        }
+        if (context.length)
+            context.push({
+                role: "assistant",
+                content: reply.text
+            });
+        appendUserMessage(reply.question, []);
+        history.append({
+            speaker: "assistant",
+            body: reply.text,
+            modelName: reply.model ? qsTr("Pip · %1").arg(reply.model.slice(0, 160)) : qsTr("Pip"),
+            state: "done",
+            filesJson: "[]",
+            hasImages: false,
+            reasoning: "",
+            reasoningBlocksJson: "[]",
+            toolContextJson: JSON.stringify(context),
+            toolActivitiesJson: JSON.stringify(activities),
+            companionReplyId: reply.id
+        });
+        return "";
     }
     function retry(): void {
         if (busy || attachmentHint || !selectedModel || !history.count)
@@ -402,6 +498,7 @@ Singleton {
             style: responseStyle,
             backend: selectedEntry?.recipe === "llamacpp" ? inferenceBackend : "auto",
             reset_backend: selectedEntry?.recipe === "llamacpp" && resetBackend,
+            desktop_context: desktopContext,
             messages: context
         };
         history.append({

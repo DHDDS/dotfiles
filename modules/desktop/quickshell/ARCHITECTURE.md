@@ -137,6 +137,10 @@ payloads. Page `host.hide()` / `openModule(id, payload)` act only while shown,
 preventing late callbacks from reopening or switching Spaces. Escape first calls
 `dismissTransient()`; the host hide control stays above page popups.
 
+Local clients open a search result with `qs ipc --path …/shell.qml call spaces
+open '{"space": …, "payload": …, "play": true}'`; see the
+[companion](#companion) for its sanitisation.
+
 Spaces share cinematic controls, keyed catalogue updates and activity indication;
 see the [presentation contract](symlinks/home/.config/quickshell/desktop/spaces/movies/ARCHITECTURE.md#presentation-contract).
 Provider, persistence and worker details belong to each Space:
@@ -596,6 +600,214 @@ exists while the drawer is closed; accepted preparation preserves the draft and
 never connects to Lemonade. Completion notifications describe actual additions
 and partial errors. See [Purpose's protocol](https://github.com/KDE/purpose/blob/v6.31.0/README.md#separate-process).
 
+### Native desktop tools
+
+`AssistantInbox.desktop` routes typed operations to `DesktopActions`. It uses
+the shell's reminder and calendar services and the Launcher's desktop-entry
+search. Results distinguish missing or ambiguous matches. Window actions
+dispatch to a validated Hyprland address and wait for focus or monitor
+readback. The drawer captures its source window before `DrawerHost` takes
+input ownership. Pip captures it before its menu or composer opens, or when a
+voice turn starts. A saved address must still match its process and app.
+
+The lid query reads logind's exposed configuration, docking/power state and
+sleep/lid inhibitors over the system bus. Agenda uses the Calendar service's
+current snapshot and reports whether it is stale.
+
+Both chat surfaces offer the backend's `microphone` tool. Its `status`,
+`select`, and `open` requests go to the shell's `AssistantInbox` IPC. The
+shared `AudioService` reads live PipeWire input nodes, default, mute and input
+gain without starting the device inventory watcher or recording audio. A
+selection uses a PipeWire object serial from a status response. The shell
+resolves the serial against its current inputs and requests the same default
+change as the Microphone drawer. The backend polls the actual default for
+confirmation. A disconnected input or missing readback is reported as an
+error. Opening settings uses the shell's normal drawer routing.
+
+## Companion
+
+The companion is its own Quickshell instance, started from `desktop/companion.qml`
+by `~/.local/bin/desktop-companion` through its desktop entry, so it runs in its
+own UWSM unit and never with the session. The entry sits in the desktop root
+because Quickshell resolves imports only inside the config root: from a
+`companion/shell.qml` root, `import "../ui"` registers no types. The script uses
+the `companion` IPC target (`status`, `behavior`, `quit`, `say`, `ask`, `listen`,
+`type`) to switch a running instance's behaviour or say goodbye; otherwise it
+execs `qs --no-duplicate` with `COMPANION_BEHAVIOR` for the first behaviour.
+Paths to helpers resolve next to `Companion.qml`, independent of the entry point.
+
+`Companion.qml` owns preferences (`companion.json`, merged on write so hand-edited
+keys survive), behaviour, the screen, conversation state, timers, cursor tracking
+and the companion-specific actions. Its `LazyLoader` creates `CompanionWindow`
+only while shown: a screen exists, its monitor's active workspace has no
+fullscreen window and no `screencast` has lasted 1.5 s; hiding cancels requests.
+Screenshots, including the companion's own `look_at_screen`, report a screencast
+for milliseconds; hiding on those would cancel the very request that took them. Without
+a pinned `output`, it moves to the focused monitor after four seconds there.
+History (12 messages, with the Assistant's saved tool context) is memory-only and
+is dropped 15 minutes after the last reply. The sentences a request spoke become
+the last message, which **Repeat last message** says again, or shows as text when
+the behaviour has no voice (`say` with `voice: false`).
+
+### Window and input
+
+The window is a 460×640 transparent Top-layer surface with the character at its
+bottom centre. Home margins keep the character's centre 80 px inside the screen.
+Cards and the bubble are placed inside the visible part of the window. The input
+region is the character, plus the bubble while it offers **More…** or recording controls and the card
+column while a card shows. While the menu or message box is open, the whole
+window takes input with `OnDemand` keyboard focus and a `HyprlandFocusGrab`;
+clicking elsewhere clears the grab and closes them.
+
+Wayland gives clients no pointer position outside their surfaces. While the
+pointer is in use, the companion asks Hyprland's request socket for `j/cursorpos`:
+10 Hz while it moves, 3 Hz when still, 60 Hz while dragging, and not at all after
+1.5 s without input (`IdleMonitor`, ignoring inhibitors). It closes the socket
+itself as soon as a reply arrives; otherwise Quickshell logs a `PeerClosedError`
+warning for every poll. Dragging places the window from the compositor's cursor
+and the press offset, because pointer deltas compound with configure latency as
+the surface moves under the pointer.
+
+Taps poke (the zone decides the reaction: face, head, side or belly), a double
+tap opens the message box, a 0.35 s press listens until release, and right-click
+opens the menu. `companion:talk` (Win+Space) starts a hands-free recording; still
+held after 450 ms, it becomes a held recording that its release ends.
+`companion:type` (Win+Shift+Space) opens the message box. A drop of local files
+asks about them through the Assistant's attachment handling.
+
+### Rendering
+
+`Character.qml` draws a vector puppet from parameters and makes no decisions;
+parts that are off are invisible and cost nothing. Parameter names follow Live2D's
+standard set (angle X/Y/Z, eye open/smile/ball, brow, mouth open/form, cheek,
+breath), plus eye styles, tongue, tears, sweat, mouth rounding, side squeeze,
+steps, sprout perk and an outfit (hats, sunglasses, scarf, umbrella). A different
+renderer could replace this file without changing behaviour code. `Puppet.qml`
+eases parameters toward the expression and gaze, blinks, breathes, plays gestures
+(waves, wiggles, hops, yawns, sneezes, winks), dances to the default sink's peak
+level, walks, perks to the microphone level and mouths speech. `Emotes.qml` draws
+floating symbols from the puppet's frame clock.
+
+Each frame costs roughly 1.5 ms of CPU, mostly Qt Quick's fixed per-frame work:
+a single animated rectangle costs over half of it. One `Timer` therefore sets the
+frame rate instead of Qt animations, which would run at the display refresh rate:
+about 30 fps while anything visibly moves, 6 fps for breathing, single wake-ups
+for blinks and glances after 30 s without input (`calm`), and none after three
+idle minutes (asleep) or while hidden. Convergence thresholds are about 0.15 px so
+easing tails stop drawing. Measured in a headless KWin on the Radeon: about 5% of
+one core while moving, 2% resting, 0.6% calm and nothing asleep. The separate
+process adds about 200 MB resident memory (Qt and the QML engine).
+
+Live2D import was rejected: Cubism Core is proprietary and downloaded by hand, it
+would need a native QML plugin rebuilt with Qt and Quickshell updates, and the
+sample model licences forbid competing runtimes. Inochi2D runtimes and Ayatsuri2D
+(created 2026-09, one maintainer) leave rendering to the host and are not yet
+dependable. A separate renderer would pay the same per-frame cost.
+
+### Behaviours
+
+`companion/behaviors.json` is read by both the app and the helper. Each behaviour
+sets `voice`, `playful` (silent reactions to waking, music starting, monitor
+changes and focus transitions), `followUp` (one hands-free follow-up),
+`speak` (`all`, or
+`summary`: the first paragraph of each tool round), the tool groups offered and a
+persona. Friend offers `desktop`, `research` and `library`; Playful, Assistant and Quiet
+add `inspect` and `changes`. The helper refuses any call outside the offered set,
+so a hallucinated or injected `run_command` never reaches an approval in Friend.
+The main shell publishes DND, active external microphone use and the timer
+list in `desktop-companion-state.json` under the runtime directory. Pip
+observes this projection. Focus folds its leaves while idle.
+Playback and spontaneous reactions pause during DND, other apps' microphone
+use or screen sharing.
+
+### Helper
+
+`companion.py` runs once per request under `timeout 0 setpriv --pdeathsig TERM`,
+like Space workers, so shell exit and cancellation reach its children. It reads
+one request line; a router thread then reads `stop`, `hold`, approval and intent
+replies from stdin. Requests are `warm` (start Lemonade and load the chat, voice
+and transcription models), `say`, `read` (the primary selection) and `turn`.
+
+A turn records raw 16 kHz audio from `pw-record`. The noise floor learns from
+quiet frames, and hands-free recordings end after 0.8 s below the speech
+threshold (or after 8 s, 5 s for a follow-up, without speech). Held recordings
+end on `stop`. Controls sent while a helper starts are buffered until its
+request is written. The recorder reports its first samples and the follow-up
+countdown. Stop terminates the helper, and Send now ends capture for
+transcription. A new request or opening the composer cancels a pending
+follow-up. Transcription uses downloaded Lemonade Whisper when
+available and falls back to `whisper-cli` with the dictation model. Bracketed
+noise annotations are dropped. Typed turns can carry dropped files or a
+screenshot of the focused output.
+
+The context menu refreshes the downloaded local chat catalogue through the
+`models` request. The saved companion preference takes priority, followed by
+the Assistant's downloaded choice, a downloaded tool-calling model, and then
+any downloaded chat model. Both the picker and inference use this catalogue.
+Inference checks download status again before sending the chat request.
+
+Conversation runs the Assistant backend's `chat()` in-process. It accepts
+`instructions`, `tools`, `delegate` and `approve`, so the companion supplies the
+persona, its tool selection, its own desktop tools and approval replies without
+changing the drawer's behaviour. It also replaces `backend.emit` to observe the
+stream. Discovery, credentials, budget fitting, tool context, research, limits
+and approval semantics stay the Assistant's.
+
+The shared backend handles native desktop operations. Media, behaviour and
+goodbye are `intent` events the companion app carries out and answers.
+`play_space_result` resolves a `search_spaces` ref (results from earlier turns
+are restored from the saved tool context) and hands its card payload to the
+shell's `spaces.open` IPC, which `ui/SpaceInbox.qml` passes to
+`SpaceState.open()` on the focused output, as a card's Open or Play does. Like
+cards, the inbox strips `command` and `actions` keys, so a client cannot supply
+a provider command; the Space resolves its own. The companion's instructions
+tell the model to play results directly, since it cannot show cards.
+Weather (the weather drawer's backend), screen descriptions (a one-shot vision
+request), notifications (the shell's `notifications.recent` IPC), volume
+(`wpctl`), reading the selection and memory run in the helper. Memory is a plain
+Markdown list of at most 60 facts, included in the instructions.
+
+Sentences are synthesized with `kokoro-v1` as 16-bit PCM while earlier ones play
+through `pw-play`. A per-turn worker takes sentences from the chat stream and
+renders them in order, so speech synthesis and paced text can run alongside
+tool calls and model output. The reply completes after its queued output.
+Missing or failing voice turns the rest into `line` events paced for reading.
+The mouth envelope is loudness per 1/30 s against the 99th percentile with a
+1.5 power curve, narrowed
+by zero-crossing rate; lip rounding spreads the sentence's o/u/w letters over the
+audio, since spectral features did not separate vowels reliably. Unspoken detail
+(structure, or more than 60 extra characters) is sent as `details` for the card,
+rendered with the Assistant's safe Markdown segments.
+
+The companion retains its latest completed exchange for handoff. The
+`assistant.continueFromPip` IPC appends the question, answer, and supported native
+and search results to the drawer's conversation and opens that
+drawer on Pip's monitor when available. It preserves the draft and existing
+messages and deduplicates by reply ID. A busy or full conversation can be
+retried once the pending request finishes or space is available. The handoff
+is capped at 32,768 UTF-16 code units for the IPC argument. Imported results
+are completed records. The importer strips provider commands and actions.
+
+Events: `listening`, `level`, `transcribing`, `heard`, `thinking`, `tool`
+(Assistant activity, including `pending_approval`), `action`, `intent`, `speech`
+or `line`, `reply`, `details`, `nothing` (`short`, `silent`, `selection`),
+`error` (`offline`, `model`, `microphone`, `speech`, `screen`, `voice`, `other`),
+`notice`, `warming`, `ready`, `done` and `cancelled`. Lemonade is started on
+demand and never stopped.
+
+### Verification
+
+`tests/test_companion.py` covers text cleaning, the envelope and rounding,
+spoken summaries, memory and instructions. Against a fake Lemonade with stub
+recorder and player, it runs a hands-free turn with GPU transcription and a
+desktop intent, a refused file write, a refused unoffered tool, memory writes,
+cancellation while recording, held and silent recordings, the voiceless fallback
+and an offline start. The app test drives gaze, speech, interruption,
+hold-to-talk, intents, the approval card, behaviour persistence, dragging and
+screencast hiding with a stub helper. Native checks remain manual: audible
+playback, microphone capture, global shortcut release events, drag and drop onto
+the layer surface, and frame cost on Hyprland.
+
 ## Capture
 
 Screenshots use `desktop-screenshot`; see [Hyprland capture integration](../hyprland/ARCHITECTURE.md#desktop-integration).
@@ -860,7 +1072,10 @@ expired data becomes visible with age after the refresh fails.
 `ReminderService` saves validated state atomically in
 `$XDG_RUNTIME_DIR/desktop-shell/reminders.json`. Startup restores it without opening
 a drawer; shell reload/crash retains it and logout clears it. Overdue alarms fire
-once; overdue focus cycles send one prompt then advance. Alarms are critical,
+once; overdue focus cycles send one prompt then advance. Countdown timers
+share the same persistence and list. Chat and Pip start one focus/break pair by
+default, while the existing clock controls start a repeating cycle. Explicit
+`repeat: true` can make a chat-started cycle repeat. Alarms and countdowns are critical,
 focus/break prompts normal. Local dates/times are re-resolved on timezone/offset
 changes, including DST, rather than treating a saved UTC deadline as permanent.
 Timers cannot wake a sleeping machine.

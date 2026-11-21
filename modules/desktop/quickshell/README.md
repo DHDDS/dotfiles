@@ -107,6 +107,12 @@ They can identify songs from remembered lyrics or movies from plot descriptions,
 research public web pages, and resolve matches to Space cards. Lyrics lookup
 prefers saved library lyrics before online providers. Local fragment matching
 uses embedded lyrics indexed by Music; open Music to refresh that index.
+Ask which microphone is the default, whether it is muted, or to switch to a
+named input. Microphone results can open the Microphone drawer for testing.
+Assistant and Pip can start or stop the same countdowns and focus sessions,
+find open windows, move a window to another monitor, and read today's agenda
+or the laptop lid policy. “This window” means the window active when you
+opened the assistant.
 Web search uses DuckDuckGo; an optional SearXNG endpoint is described in
 [research configuration](ARCHITECTURE.md#web-and-lyrics-research).
 Ask for “my library only” to use your collection or “offline” to search saved
@@ -122,6 +128,57 @@ Images require a vision model; scanned PDFs need OCR or page images.
 Dolphin's **Share → Add to Assistant** accumulates frozen file snapshots in the
 draft without opening the drawer or sending. Restart Dolphin after installation
 if the Share action is missing. See [service details](ARCHITECTURE.md#assistant).
+
+## Companion
+
+**Pip** is an animated desktop companion that talks, helps and plays. Start it
+from application search or with `desktop-companion`; starting it again says
+goodbye. It never starts with the session.
+
+Click to play (where you poke matters), drag to move, double-click to type and
+press and hold to talk. **Win+Space**: tap to talk hands-free, or hold until
+you finish speaking. Hands-free mode offers one brief follow-up and shows
+when the microphone is open. **Send now** submits what it heard and **Stop**
+discards the recording.
+**Win+Shift+Space** opens the message box. Right-click for listening, reading
+highlighted text aloud, looking at the screen, repeating the last message,
+behaviours, timers, the last answer, memory and goodbye. Choose **Chat model**
+to switch between your downloaded Lemonade models. Drop files on Pip to ask
+about them. Clicking while it talks interrupts.
+
+Right-click for **Microphone settings** if Pip can't hear you, or type
+“Which microphone is active?” **Continue in Assistant** brings over the last
+question, answer, and available desktop and search results.
+
+**Playful** is the default. **Friend** is geared toward children, **Assistant**
+keeps reactions minimal, and **Quiet** answers in text. Switch from the menu,
+by asking, or with `desktop-companion assistant`.
+
+Pip can open apps, play songs, radio, TV, YouTube, movies and episodes from your
+Spaces (or open albums, series and games there), control music, change the
+volume, switch windows, set timers, check the weather, read notifications or look
+at the screen when asked, search the web, and remember things in
+`~/.local/share/companion/memory.md`.
+Assistant and Quiet can also inspect the system and read files; commands and file
+writes run only after you click **Run it** or **Write it** on the exact
+preview. Speech never approves anything.
+
+Pip folds its leaves during a focus session and stretches at the break. Its
+playful reactions pause during Do Not Disturb, microphone use by other apps, or
+screen sharing. The **Timers** menu can start a 25-minute focus session, stop
+running timers, or open the clock and timer controls.
+
+Pip starts Lemonade when it opens and uses the Assistant's downloaded chat model
+by default. Choose a model with tool calling for desktop actions and a vision
+model for screen questions. `lemonade pull kokoro-v1` adds its voice and
+`lemonade pull Whisper-Small` adds faster transcription. It can also transcribe
+with the local dictation model. Kokoro does not speak Bulgarian.
+
+`~/.config/quickshell/desktop/companion.json` also accepts `name`, `voice` (a
+Kokoro voice such as `af_heart` or `af_sky`), `speed`, `model`, `transcriber`,
+`language`, `speechModel`, `output` (pins a monitor), `follow: false` (stays on
+one monitor) and `birthdays` (`["MM-DD"]`, for party hats). See
+[companion details](ARCHITECTURE.md#companion).
 
 ## Devices and networking
 

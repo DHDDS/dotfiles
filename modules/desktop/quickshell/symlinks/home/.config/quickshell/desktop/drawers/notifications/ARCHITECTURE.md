@@ -45,6 +45,9 @@ closure preserves the latest acknowledged state rather than an older snapshot.
 
 `qs ipc -c desktop call notifications status` reports only quiet mode, whether
 the drawer is open, and history/popup/unseen counts, without notification content.
+`recent COUNT` returns up to 20 history entries, newest first, with app, summary,
+body (600 characters), time and seen state; the desktop companion calls it only
+when asked about notifications.
 
 Replacements update the existing ID and popup in place, preserving its hover
 state, rather than duplicating history or rebuilding the visible card.

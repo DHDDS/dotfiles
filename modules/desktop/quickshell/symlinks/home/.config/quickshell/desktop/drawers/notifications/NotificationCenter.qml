@@ -319,6 +319,16 @@ Singleton {
                 popups: root.popups.count
             });
         }
+        // Recent history, newest first, for the desktop companion's notification tool.
+        function recent(count: int): string {
+            return JSON.stringify(root.state.items.slice(0, Math.max(1, Math.min(count || 5, 20))).map(row => ({
+                        app: row.app,
+                        summary: row.summary,
+                        body: String(row.body || "").slice(0, 600),
+                        time: new Date(row.timestamp * 1000).toISOString(),
+                        seen: row.seen !== false
+                    })));
+        }
     }
     Loader {
         active: root.started && root.initialized

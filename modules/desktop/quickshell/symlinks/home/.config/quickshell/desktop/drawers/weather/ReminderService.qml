@@ -40,6 +40,13 @@ Singleton {
                 zone: entry.zone,
                 message: entry.message.slice(0, 160)
             };
+        if (entry.kind === "timer" && typeof entry.message === "string")
+            return {
+                id: entry.id,
+                kind: "timer",
+                deadline: entry.deadline,
+                message: entry.message.slice(0, 160)
+            };
         if (entry.kind === "pomodoro" && ["focus", "break"].includes(entry.phase) && validMinutes(entry.focus) && validMinutes(entry.rest))
             return {
                 id: entry.id,
@@ -47,14 +54,18 @@ Singleton {
                 phase: entry.phase,
                 focus: entry.focus,
                 rest: entry.rest,
+                repeat: entry.repeat !== false,
                 deadline: entry.deadline
             };
         return null;
     }
     function restore(text: string): void {
         let saved = [];
+        let savedNextId = 1;
         try {
-            saved = text ? JSON.parse(text).entries : [];
+            const value = text ? JSON.parse(text) : {};
+            saved = value.entries;
+            savedNextId = Number.isSafeInteger(value.nextId) && value.nextId > 0 ? value.nextId : 1;
         } catch (_) {}
         const ids = new Set();
         let pomodoro = false;
@@ -67,7 +78,7 @@ Singleton {
             pomodoro = pomodoro || row.kind === "pomodoro";
             rows.push(row);
         }
-        nextId = rows.reduce((last, row) => Math.max(last, row.id), 0) + 1;
+        nextId = Math.max(savedNextId, rows.reduce((last, row) => Math.max(last, row.id), 0) + 1);
         entries = rows;
         restored = true;
     }
@@ -119,7 +130,22 @@ Singleton {
         ]);
         return true;
     }
-    function addPomodoro(focus, rest): bool {
+    function addTimer(seconds: int, message: string): int {
+        if (seconds < 1 || seconds > 86400 || entries.length >= 100)
+            return 0;
+        now = clock();
+        const id = nextId++;
+        entries = entries.concat([
+            {
+                id,
+                kind: "timer",
+                deadline: now + seconds * 1000,
+                message: message.trim().slice(0, 160)
+            }
+        ]);
+        return id;
+    }
+    function addPomodoro(focus, rest, repeat = true): bool {
         if (hasPomodoro || !Number.isInteger(focus) || !Number.isInteger(rest) || focus < 1 || focus > 1440 || rest < 1 || rest > 1440)
             return false;
         now = clock();
@@ -130,6 +156,7 @@ Singleton {
                 phase: "focus",
                 focus,
                 rest,
+                repeat,
                 deadline: now + focus * 60000
             }
         ]);
@@ -166,7 +193,9 @@ Singleton {
             }
             if (entry.kind === "alarm") {
                 deliver(qsTr("Reminder"), entry.message || qsTr("Your reminder is due."), "critical");
-            } else {
+            } else if (entry.kind === "timer") {
+                deliver(qsTr("Timer finished"), entry.message || qsTr("Your timer is done."), "critical");
+            } else if (entry.phase === "focus" || entry.repeat) {
                 const phase = entry.phase === "focus" ? "break" : "focus";
                 const minutes = phase === "break" ? entry.rest : entry.focus;
                 deliver(phase === "break" ? qsTr("Time for a break") : qsTr("Time to focus"), phase === "break" ? qsTr("Take a %1-minute break.").arg(minutes) : qsTr("Focus for %1 minutes.").arg(minutes), "normal");
@@ -176,13 +205,15 @@ Singleton {
                     phase,
                     deadline: at + minutes * 60000
                 }));
-            }
+            } else
+                deliver(qsTr("Break finished"), qsTr("Your focus session is complete."), "normal");
         }
         if (JSON.stringify(next) !== JSON.stringify(entries))
             entries = next;
     }
     onEntriesChanged: if (restored)
         store.setText(JSON.stringify({
+            nextId,
             entries
         }))
     // Overdue alarms fire once on the first tick; an overdue focus cycle sends

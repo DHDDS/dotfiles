@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Pip
+GenericName=Desktop companion
+Comment=An animated companion that talks, helps and plays
+Exec=desktop-companion
+Icon=desktop-companion
+Terminal=false
+Categories=Utility;
+Keywords=companion;assistant;voice;pet;sprout;

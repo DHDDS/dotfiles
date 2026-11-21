@@ -44,6 +44,8 @@ Singleton {
     }
     readonly property var streams: records(true, Pipewire.nodes.values, Pipewire.linkGroups.values)
     readonly property var recordings: records(false, Pipewire.nodes.values, Pipewire.linkGroups.values)
+    readonly property var inputNodes: Object.values(nodes).filter(node => !node.isSink)
+    readonly property bool otherRecording: recordings.some(stream => stream.active && stream.applicationId !== "dotfiles.companion" && !stream.node.audio.muted)
     // Test hooks for the helper processes.
     readonly property alias watcher: watcher
     readonly property alias worker: worker
@@ -122,6 +124,45 @@ Singleton {
         else
             Pipewire.preferredDefaultAudioSource = node;
     }
+    function microphoneId(node): string {
+        return String(node.properties["object.serial"] ?? "");
+    }
+    function microphones(): var {
+        if (!Pipewire.ready || inputNodes.some(node => !node.ready))
+            return {
+                error: qsTr("The live audio state is unavailable.")
+            };
+        const current = Pipewire.defaultAudioSource;
+        const inputs = inputNodes.map(node => ({
+                    id: microphoneId(node),
+                    label: node.description || node.nickname || node.name,
+                    active: node === current,
+                    muted: node.audio.muted,
+                    level: Math.round(level(node))
+                }));
+        const active = inputs.find(item => item.active) ?? null;
+        return {
+            inputs,
+            active,
+            warning: current && !active ? qsTr("The default audio source is outside the microphone list.") : ""
+        };
+    }
+    function selectMicrophone(id: string): var {
+        if (!Pipewire.ready || !id)
+            return {
+                error: qsTr("The live audio state is unavailable.")
+            };
+        const source = inputNodes.find(node => node.ready && microphoneId(node) === id);
+        if (!source)
+            return {
+                error: qsTr("That microphone is unavailable. Check the input list again.")
+            };
+        if (source !== Pipewire.defaultAudioSource)
+            setDefault(source);
+        return {
+            requested: true
+        };
+    }
     function boostFor(device: string): bool {
         return boosts[device] === true;
     }
@@ -199,7 +240,7 @@ Singleton {
     }
 
     PwObjectTracker {
-        objects: root.observing ? Pipewire.nodes.values.filter(node => node.audio).concat(Pipewire.linkGroups.values.filter(group => group.source?.isStream || group.target?.isStream)) : []
+        objects: root.observing ? Pipewire.nodes.values.filter(node => node.audio).concat(Pipewire.linkGroups.values.filter(group => group.source?.isStream || group.target?.isStream)) : root.inputNodes.concat(Pipewire.nodes.values.filter(node => node.audio && node.isStream && !node.isSink), Pipewire.linkGroups.values.filter(group => group.target?.isStream && !group.target?.isSink))
     }
     Process {
         id: watcher

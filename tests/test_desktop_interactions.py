@@ -884,21 +884,25 @@ ShellRoot {
             support.REPO
             / 'modules/desktop/hyprland/symlinks/home/.config/hypr/bindings.lua'
         ).read_text()
-        wanted = set(re.findall(r'hl\.dsp\.global\("desktop:([\w-]+)"\)', bindings))
-        self.assertIn('launcher', wanted)
+        # Binds name an app ID: "desktop" for the shell, "companion" for its app.
+        wanted = set(re.findall(r'hl\.dsp\.global\("([\w-]+):([\w-]+)"\)', bindings))
+        self.assertIn(('desktop', 'launcher'), wanted)
         registered = set()
         for path in DESKTOP.rglob('*.qml'):
             for block in re.findall(
                 r'GlobalShortcut \{\n(.*?)\n *\}', path.read_text(), flags=re.S
             ):
-                self.assertIn('appid: "desktop"', block, path)
+                app = re.search(r'^ *appid: "([\w-]+)"$', block, flags=re.M)
+                self.assertIsNotNone(app, path)
                 registered.update(
-                    re.findall(r'^ *name: "([\w-]+)"$', block, flags=re.M)
+                    (app[1], name)
+                    for name in re.findall(r'^ *name: "([\w-]+)"$', block, flags=re.M)
                 )
                 # DrawerHost registers each catalogue shortcut under the same app ID.
                 if re.search(r'^ *name: modelData\.shortcut$', block, flags=re.M):
                     registered.update(
-                        re.findall(
+                        (app[1], name)
+                        for name in re.findall(
                             r'^ *shortcut: "([\w-]+)"$',
                             (DESKTOP / 'drawers/Drawers.qml').read_text(),
                             flags=re.M,
