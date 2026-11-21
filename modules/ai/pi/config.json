@@ -1,4 +1,7 @@
 {
+    "packages": [
+        "extra/npm"
+    ],
     "extra": {
         "aur_packages": [
             "pi-coding-agent-bin"

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=VS Code
+GenericName=Code Editor
+Comment=Open a folder in VS Code
+Exec=/usr/local/bin/code %f
+TryExec=/usr/local/bin/code
+Icon=com.visualstudio.code.oss
+MimeType=inode/directory;
+Categories=Development;IDE;
+Terminal=false

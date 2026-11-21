@@ -34,8 +34,8 @@ Framework detection remains manifest based.
 Language percentages appear inside the matching technology badges. Languages
 found only by the scanner receive their own badges; framework/tool badges without
 measured source have no percentage. Combined language badges sum their matching
-language shares. Every detected technology and language is included, without a
-top-language cutoff. Badges have no tooltips; partial-scan information appears in
+language shares. Zero-byte languages are hidden. Positive shares that would round to 0.0% are
+shown as <0.1%. Badges have no tooltips; partial-scan information appears in
 the status line. There is no separate language bar or text legend.
 
 Tokei honors `.ignore`/`.tokeignore` and native Git ignore rules (Git ignore files
@@ -78,7 +78,19 @@ Native task runners control their own scripts/hooks once the user runs a task.
 All explicit actions launch through `uwsm app` and `xdg-terminal-exec --hold`.
 Mise install/upgrade use `mise install` / `mise upgrade --local`; configuration
 trust stays native and interactive. Quick actions use Zed (`zeditor`, then `zed`),
-the default folder handler, a terminal, or a sanitized remote browser URL.
+OpenCode, a terminal, or a sanitized remote browser URL.
+
+## AI
+
+The AI card queries Lemonade's local models endpoint off the UI thread. The model
+picker lists downloaded chat models and can hand selection to the interactive
+Lemonade launcher. Open Pi invokes [Lemonade's official Pi integration](https://lemonade-server.ai/docs/integrations/pi/)
+in the project terminal with the selected model. The CLI receives any configured
+API key through its environment.
+
+Refresh reads status without starting a service. Start Lemonade starts the
+on-demand user unit, then waits for its models endpoint. An active system
+instance takes precedence, as in the Assistant drawer.
 
 ## Git
 

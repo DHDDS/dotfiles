@@ -40,11 +40,23 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QScrollArea
 from project_dashboard import ProjectDialog
+from unittest.mock import patch
+def lemonade_status(start):
+ if start:
+  return dict(models=['local-model', 'second-model'], can_start=False, message='')
+ return dict(models=None, can_start=True, message='Lemonade is offline.')
+patch('project_dashboard.lemonade_status', lemonade_status).start()
+def fake_ai_bins(name):
+ return '/test/'+name if name in ('lemonade', 'pi', 'opencode') else which(name)
+from shutil import which
+patch('project_dashboard.shutil.which', fake_ai_bins).start()
 root=Path(os.environ['PROJECT_TEST_ROOT'])
 app=QApplication([])
 calls=[]
-w=ProjectDialog(root, lambda *args: calls.append(args))
+w=ProjectDialog(root, lambda *args, **kw: calls.append((args, kw) if kw else args))
 w.show()
+from PySide6.QtWidgets import QPushButton
+assert not any(b.text()=='Open folder' for b in w.findChildren(QPushButton))
 def wait_for(condition):
  deadline=time.monotonic()+10
  while not condition():
@@ -69,6 +81,17 @@ assert w.tool_list.height()>180
 assert abs(w.tool_list.height()-w.tabs.contentsRect().height())<50
 w.tabs.setCurrentIndex(0)
 
+wait_for(lambda:w.lemonade_start.isVisible())
+assert not w.pi_open.isEnabled()
+w.lemonade_start.click()
+wait_for(lambda:w.pi_models.count()==3)
+assert not w.lemonade_start.isVisible()
+w.pi_models.setCurrentIndex(1)
+w.pi_open.click()
+assert calls.pop()==(('pi',root), {'model':'second-model'}),calls
+assert w.findChild(QPushButton, 'openOpenCode').isEnabled()
+w.findChild(QPushButton, 'openOpenCode').click()
+assert calls.pop()==('opencode',root)
 assert not calls and not (root/'MUST_NOT_RUN').exists()
 w.task_search.setText('check')
 assert w.task_list.topLevelItem(0).isHidden()
@@ -112,6 +135,8 @@ assert calls[-1]==('task',root,'build','package',['space value','--watch']),call
 # Every scanner language gets a badge, including tiny shares beyond the first seven.
 w.show_languages({'partial':False,'languages':[
  {'name':'Rust','percentage':80,'bytes':800,'files':1,'color':'#dea584'},
+ {'name':'Tiny','percentage':0.001,'bytes':1,'files':1,'color':'#808080'},
+ {'name':'Empty','percentage':0,'bytes':0,'files':1,'color':'#808080'},
  *[{'name':'Other'+str(i),'percentage':20/9,'bytes':20,'files':1,'color':'#808080'} for i in range(9)]]})
 app.processEvents()
 assert w.findChild(QScrollArea).horizontalScrollBar().maximum()==0
@@ -119,8 +144,9 @@ badges={w.tech_layout.itemAt(i).widget().objectName():w.tech_layout.itemAt(i).wi
 from PySide6.QtWidgets import QLabel, QProgressBar
 assert 'tech_Rust' in badges and all('tech_Other'+str(i) in badges for i in range(9))
 assert badges['tech_Rust'].findChild(QLabel,'techPercentage').text()=='80.0%'
+assert badges['tech_Tiny'].findChild(QLabel,'techPercentage').text()=='<0.1%'
+assert 'tech_Empty' not in badges
 assert not w.findChildren(QProgressBar)
-from unittest.mock import patch
 w.zed='/test/zeditor'
 with patch('project_dashboard.subprocess.Popen') as popen:
  w.open_editor()

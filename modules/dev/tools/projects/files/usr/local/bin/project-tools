@@ -8,6 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+LIB = Path(__file__).resolve().parents[1] / 'lib/project-tools'
 PROTECTED = ('.env', '.env.*', '.envrc', '.direnv', '*.local', '*.local.*')
 
 
@@ -117,8 +118,14 @@ def select(items):
     return list(dict.fromkeys(items[number - 1] for number in numbers))
 
 
-def perform(action, path, task=None, runner='mise', arguments=()):
+def perform(action, path, task=None, runner='mise', arguments=(), *, model=None):
     path = Path(path).resolve()
+    if action == 'opencode':
+        return subprocess.run(['opencode'], cwd=path, check=False).returncode
+    if action == 'pi':
+        sys.path.insert(0, str(LIB))
+        from project_ai import open_pi
+        return open_pi(path, model)
     root = repository(path)
     working = root or path
     # These are user-triggered terminal operations; config trust stays interactive.
@@ -126,7 +133,7 @@ def perform(action, path, task=None, runner='mise', arguments=()):
         command = ['mise', 'install'] if action == 'install' else ['mise', 'upgrade', '--local']
         return subprocess.run(command, cwd=working, check=False).returncode
     if action == 'task' and runner != 'mise':
-        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'lib/project-tools'))
+        sys.path.insert(0, str(LIB))
         from project_tasks import command
         if task is None:
             raise ValueError('Choose a task from the project overview.')
@@ -190,7 +197,7 @@ def perform(action, path, task=None, runner='mise', arguments=()):
 
 def git_action(action, root):
     """Delegate authentication, commit editors/signing and hooks to native Git."""
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'lib/project-tools'))
+    sys.path.insert(0, str(LIB))
     from project_inspector import git_status
     ensure_idle(root)
     state = git_status(root)
@@ -221,13 +228,15 @@ def git_action(action, root):
     return subprocess.run(['git', '-C', str(root), *command], check=False).returncode
 
 
-def open_terminal(action, path, task=None, runner='mise', arguments=()):
+def open_terminal(action, path, task=None, runner='mise', arguments=(), *, model=None):
     command = ['uwsm', 'app', '-t', 'service', '--', 'xdg-terminal-exec', f'--dir={path}']
     if action != 'terminal':
         command += ['--hold', sys.executable, str(Path(__file__).resolve()), '--action', action]
         if task is not None:
             command += ['--runner', runner, '--task', task]
             command.extend('--task-arg=' + value for value in arguments)
+        if model is not None:
+            command.append('--model=' + model)
         command.append(str(path))
     return subprocess.Popen(command)
 
@@ -235,7 +244,7 @@ def open_terminal(action, path, task=None, runner='mise', arguments=()):
 def window(path):
     from PySide6.QtWidgets import QApplication, QFileDialog
 
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'lib/project-tools'))
+    sys.path.insert(0, str(LIB))
     from project_dashboard import ProjectDialog
 
     _app = QApplication.instance() or QApplication(sys.argv[:1])
@@ -250,18 +259,26 @@ def window(path):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--action', choices=['install', 'upgrade', 'task', 'clean', 'reset', 'fetch', 'push', 'pull', 'commit'])
+    parser.add_argument('--action', choices=['install', 'upgrade', 'task', 'clean', 'reset', 'fetch', 'push', 'pull', 'commit', 'opencode', 'pi'])
     parser.add_argument('--task', help='Run a project task (with --action task).')
     parser.add_argument('--runner', choices=['mise', 'package', 'make', 'just'], default='mise')
     parser.add_argument('--task-arg', action='append', default=[])
+    parser.add_argument('--model', help='Lemonade model (with --action pi).')
     parser.add_argument('path', nargs='?')
     options = parser.parse_args()
     if options.action and not options.path:
         parser.error('An action requires a project path.')
     if options.task is not None and options.action != 'task':
         parser.error('--task requires --action task.')
+    if options.model is not None and options.action != 'pi':
+        parser.error('--model requires --action pi.')
     try:
-        return perform(options.action, options.path, options.task, options.runner, options.task_arg) if options.action else window(options.path)
+        if options.action:
+            return perform(
+                options.action, options.path, options.task, options.runner,
+                options.task_arg, model=options.model,
+            )
+        return window(options.path)
     except (ValueError, OSError, subprocess.SubprocessError) as error:
         print(f'Project action failed: {error}', file=sys.stderr)
         return 1

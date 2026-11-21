@@ -9,8 +9,9 @@ Access**, which the add-on requires even for localhost, and **Auto Start**.
 Open Blender afterward to use its MCP tools; `/mcp` shows the connection in
 ChatGPT or Codex.
 
-Topgrade upgrades the MCP server from its upstream Git source; reapplying the
-dotfiles configuration also updates it. The add-on updates through Blender's
-extension system. If a uv update fails, choose **Continue** in Topgrade to run
+Topgrade upgrades the MCP server from its upstream Git source and checks the
+Blender profile afterward. If Blender is open during the update, close it and
+run `blender-mcp-setup` to complete the check. The add-on updates through
+Blender's extension system. If a uv update fails, choose **Continue** in Topgrade to run
 the remaining updates; the run will still report that failure. Rerun when the
 network is available. See [ARCHITECTURE.md](ARCHITECTURE.md) for lifecycle details.

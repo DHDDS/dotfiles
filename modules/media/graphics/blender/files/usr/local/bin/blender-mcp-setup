@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+mode=${1:---repair}
+if (($# > 1)) || [[ $mode != --repair && $mode != --install ]]; then
+    echo 'Usage: blender-mcp-setup [--repair|--install]' >&2
+    exit 2
+fi
+
+if ((EUID == 0)); then
+    echo 'Run blender-mcp-setup as your regular user.' >&2
+    exit 1
+fi
+
+if pgrep -u "$EUID" -x blender >/dev/null; then
+    if [[ $mode == --install ]]; then
+        echo 'Save your work and close Blender before applying its configuration.' >&2
+        exit 1
+    fi
+    echo 'Blender MCP check deferred. Close Blender and run blender-mcp-setup.'
+    exit 0
+fi
+
+bin_dir=$(dirname -- "$(readlink -f -- "$0")")
+exec blender --background -noaudio --disable-autoexec --python-exit-code 1 \
+    --python "$bin_dir/../libexec/blender-mcp-configure.py" -- "$mode"

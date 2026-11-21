@@ -1,0 +1,2 @@
+[post_commands]
+"Check Blender MCP" = "/usr/local/bin/blender-mcp-setup"

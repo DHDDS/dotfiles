@@ -959,6 +959,11 @@
                 "mode": "0755"
             },
             {
+                "source": "modules/dev/editors/vscode/files/usr/local/share/applications/vscode-folder.desktop",
+                "target": "/usr/local/share/applications/vscode-folder.desktop",
+                "mode": "0644"
+            },
+            {
                 "source": "modules/dev/editors/zed/files/usr/local/share/applications/zed-folder.desktop",
                 "target": "/usr/local/share/applications/zed-folder.desktop",
                 "mode": "0644"
@@ -1057,6 +1062,11 @@
                 "source": "modules/dev/tools/projects/files/usr/local/bin/project-tools",
                 "target": "/usr/local/bin/project-tools",
                 "mode": "0755"
+            },
+            {
+                "source": "modules/dev/tools/projects/files/usr/local/lib/project-tools/project_ai.py",
+                "target": "/usr/local/lib/project-tools/project_ai.py",
+                "mode": "0644"
             },
             {
                 "source": "modules/dev/tools/projects/files/usr/local/lib/project-tools/project_dashboard.py",
@@ -1396,6 +1406,21 @@
             {
                 "source": "modules/look-and-feel/qt/files/etc/environment.d/qt.conf",
                 "target": "/etc/environment.d/qt.conf",
+                "mode": "0644"
+            },
+            {
+                "source": "modules/media/graphics/blender/files/home/.config/topgrade.d/blender.toml",
+                "target": "home/.config/topgrade.d/blender.toml",
+                "mode": "0644"
+            },
+            {
+                "source": "modules/media/graphics/blender/files/usr/local/bin/blender-mcp-setup",
+                "target": "/usr/local/bin/blender-mcp-setup",
+                "mode": "0755"
+            },
+            {
+                "source": "modules/media/graphics/blender/files/usr/local/libexec/blender-mcp-configure.py",
+                "target": "/usr/local/libexec/blender-mcp-configure.py",
                 "mode": "0644"
             },
             {
@@ -3996,6 +4021,7 @@
             "modules/look-and-feel/icons/scripts/50_icons.sh",
             "modules/dev/tools/meld/scripts/50_meld.sh",
             "modules/media/video/mpv/scripts/50_mpv.sh",
+            "modules/ai/pi/scripts/50_pi-extensions.sh",
             "modules/hardware/power/scripts/50_power.sh",
             "modules/dev/tools/projects/scripts/50_project-tools.sh",
             "modules/dev/languages/python/scripts/50_python.sh",
@@ -4047,6 +4073,7 @@
         "extra/lemonade-server",
         "python",
         "extra/opencode",
+        "extra/npm",
         "ark",
         "unrar",
         "unzip",
@@ -4123,7 +4150,6 @@
         "zed",
         "go",
         "extra/nodejs",
-        "extra/npm",
         "bun",
         "pnpm",
         "python-pip",

@@ -5,11 +5,13 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from project_ai import lemonade_status
 from project_inspector import TECH, inspect, local_file, sync_action
 from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, Signal, Slot
 from PySide6.QtGui import QDesktopServices, QIcon
 from PySide6.QtWidgets import (
     QApplication,
+    QComboBox,
     QDialog,
     QFrame,
     QGridLayout,
@@ -45,6 +47,16 @@ class Inspector(QRunnable):
             self.result.failed.emit(f'Could not inspect this project: {error}')
 
 
+class LemonadeProbe(QRunnable):
+    def __init__(self, start):
+        super().__init__()
+        self.start_service = start
+        self.result = Result()
+
+    def run(self):
+        self.result.ready.emit(lemonade_status(self.start_service))
+
+
 class ProjectDialog(QDialog):
     def __init__(self, path, launch, auto_refresh=True):
         super().__init__()
@@ -52,6 +64,7 @@ class ProjectDialog(QDialog):
         self.launch = launch
         self.snapshot = None
         self.worker = None
+        self.lemonade_worker = None
         self.setWindowTitle('Project tools · ' + self.path.name)
         self.setWindowIcon(QIcon.fromTheme('applications-development'))
         self.resize(1040, 920)
@@ -140,7 +153,6 @@ class ProjectDialog(QDialog):
         if not self.editor.isEnabled():
             self.editor.setToolTip('Zed is unavailable.')
         shortcuts.addWidget(self.editor)
-        shortcuts.addWidget(self.button('Open folder', 'folder-open', self.open_folder))
         shortcuts.addWidget(
             self.button(
                 'Terminal',
@@ -148,6 +160,16 @@ class ProjectDialog(QDialog):
                 lambda: self.launch('terminal', self.path),
             )
         )
+        opencode = self.button(
+            'OpenCode',
+            'utilities-terminal',
+            lambda: self.launch('opencode', self.path),
+            'openOpenCode',
+        )
+        opencode.setEnabled(shutil.which('opencode') is not None)
+        if not opencode.isEnabled():
+            opencode.setToolTip('OpenCode is unavailable.')
+        shortcuts.addWidget(opencode)
         shortcuts.addStretch()
         hero_layout.addLayout(shortcuts)
         self.content.addWidget(self.hero)
@@ -157,6 +179,42 @@ class ProjectDialog(QDialog):
         left.setSpacing(14)
         columns.addLayout(left, 2)
         self.content.addLayout(columns, 1)
+        self.ai_card = self.card()
+        ai_layout = QVBoxLayout(self.ai_card)
+        ai_layout.addWidget(self.section_title('AI', 'applications-development'))
+        ai_controls = QHBoxLayout()
+        model_label = self.label('Lemonade model')
+        self.pi_models = QComboBox()
+        self.pi_models.setObjectName('lemonadeModels')
+        self.pi_models.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        self.pi_models.setMinimumContentsLength(14)
+        self.pi_models.setEnabled(False)
+        model_label.setBuddy(self.pi_models)
+        self.pi_open = self.button(
+            'Open Pi',
+            'utilities-terminal',
+            self.open_pi,
+            'openPi',
+        )
+        self.pi_open.setEnabled(False)
+        self.lemonade_start = self.button(
+            'Start Lemonade',
+            'media-playback-start',
+            lambda: self.probe_lemonade(start=True),
+            'startLemonade',
+        )
+        self.lemonade_start.hide()
+        ai_controls.addWidget(model_label)
+        ai_controls.addWidget(self.pi_models, 1)
+        ai_controls.addWidget(self.pi_open)
+        ai_controls.addWidget(self.lemonade_start)
+        ai_layout.addLayout(ai_controls)
+        self.ai_status = self.label('', muted=True)
+        self.ai_status.setObjectName('lemonadeStatus')
+        ai_layout.addWidget(self.ai_status)
+        left.addWidget(self.ai_card)
         self.git_card = self.card()
         git_layout = QVBoxLayout(self.git_card)
         git_layout.addWidget(self.section_title('Git', 'vcs-branch'))
@@ -308,6 +366,7 @@ class ProjectDialog(QDialog):
         footer.addWidget(self.button('Close', 'window-close', self.close))
         layout.addLayout(footer)
         self.hero.setEnabled(False)
+        self.ai_card.setEnabled(False)
         self.git_card.hide()
         self.mise_card.hide()
         self.maintenance.hide()
@@ -360,6 +419,7 @@ class ProjectDialog(QDialog):
             return
         self.refresh_button.setEnabled(False)
         self.status.setText('Reading local project files…')
+        self.probe_lemonade()
         self.worker = Inspector(self.path)
         self.worker.result.ready.connect(self.loaded)
         self.worker.result.failed.connect(self.failed)
@@ -370,6 +430,7 @@ class ProjectDialog(QDialog):
         self.worker = None
         self.refresh_button.setEnabled(True)
         self.hero.setEnabled(True)
+        self.ai_card.setEnabled(True)
         self.status.setText(message)
 
     @Slot(dict)
@@ -379,6 +440,7 @@ class ProjectDialog(QDialog):
         self.path = Path(snapshot['path'])
         self.refresh_button.setEnabled(True)
         self.hero.setEnabled(True)
+        self.ai_card.setEnabled(True)
         self.name.setText(snapshot['name'])
         self.setWindowTitle('Project tools · ' + snapshot['name'])
         self.description.setText(snapshot['description'] or 'Local project overview')
@@ -518,6 +580,58 @@ class ProjectDialog(QDialog):
             status += ' · Partial language scan'
         self.status.setText(status)
 
+    def probe_lemonade(self, start=False):
+        if self.lemonade_worker:
+            return
+        if not shutil.which('lemonade'):
+            self.show_lemonade(
+                dict(models=None, can_start=False, message='Lemonade is unavailable.')
+            )
+            return
+        self.ai_status.setText('Starting Lemonade…' if start else 'Checking Lemonade…')
+        self.ai_status.show()
+        self.pi_open.setEnabled(False)
+        self.pi_models.setEnabled(False)
+        self.lemonade_start.setEnabled(False)
+        self.lemonade_worker = LemonadeProbe(start)
+        self.lemonade_worker.result.ready.connect(self.show_lemonade)
+        QThreadPool.globalInstance().start(self.lemonade_worker)
+
+    @Slot(dict)
+    def show_lemonade(self, status):
+        self.lemonade_worker = None
+        models = status['models']
+        message = status['message']
+        if models is not None:
+            previous = self.pi_models.currentText()
+            self.pi_models.clear()
+            for model in models:
+                self.pi_models.addItem(model, model)
+            self.pi_models.addItem('Choose in terminal…')
+            index = self.pi_models.findText(previous)
+            if index >= 0:
+                self.pi_models.setCurrentIndex(index)
+            self.pi_models.setEnabled(bool(models))
+            pi_available = shutil.which('pi') is not None
+            self.pi_open.setEnabled(pi_available)
+            if not pi_available:
+                message = 'Pi is unavailable.'
+            elif not models:
+                message = (
+                    'No downloaded chat models. Open Pi to choose or download one.'
+                )
+        else:
+            self.pi_models.clear()
+            self.pi_models.setEnabled(False)
+            self.pi_open.setEnabled(False)
+        self.lemonade_start.setEnabled(status['can_start'])
+        self.lemonade_start.setVisible(status['can_start'])
+        self.ai_status.setText(message)
+        self.ai_status.setVisible(bool(message))
+
+    def open_pi(self):
+        self.launch('pi', self.path, model=self.pi_models.currentData())
+
     def show_languages(self, report):
         while self.tech_layout.count():
             item = self.tech_layout.takeAt(0)
@@ -547,12 +661,15 @@ class ProjectDialog(QDialog):
                         evidence=[],
                     )
                 )
-        for index, tech in enumerate(technologies):
+        for tech in technologies:
             matches = [
                 by_name[name]
                 for name in aliases.get(tech['name'], (tech['name'],))
                 if name in by_name
             ]
+            share = sum(language['percentage'] for language in matches)
+            if matches and share == 0:
+                continue
             chip = QFrame()
             chip.setObjectName('tech_' + tech['name'])
             chip.setProperty('techBadge', True)
@@ -573,11 +690,11 @@ class ProjectDialog(QDialog):
             row.addStretch()
             if matches:
                 percentage = self.label(
-                    f'{sum(language["percentage"] for language in matches):.1f}%',
-                    muted=True,
+                    '<0.1%' if share < 0.05 else f'{share:.1f}%', muted=True
                 )
                 percentage.setObjectName('techPercentage')
                 row.addWidget(percentage)
+            index = self.tech_layout.count()
             self.tech_layout.addWidget(chip, index // 6, index % 6)
 
     def filter_tasks(self, text):
@@ -608,11 +725,6 @@ class ProjectDialog(QDialog):
         subprocess.Popen(
             ['uwsm', 'app', '-t', 'service', '--', self.zed, str(self.path)]
         )
-
-    def open_folder(self):
-        from PySide6.QtCore import QUrl
-
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.path)))
 
     def open_remote(self):
         from PySide6.QtCore import QUrl
