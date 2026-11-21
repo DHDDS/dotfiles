@@ -478,10 +478,23 @@ def playlist_page(playlist_id, offset=0, limit=SEARCH_PAGE_SIZE, cursor=''):
     return apple_songs(apple_url('/playlists/' + playlist_id + '/tracks', params))
 
 
+def playlist_details(item):
+    playlist_id = safe_playlist_id(item.get('id'))
+    songs, _, cursor = playlist_page(playlist_id, limit=100)
+    seen_cursors = set()
+    while cursor:
+        if cursor in seen_cursors:
+            raise MusicError('The catalogue repeated a playlist page link.')
+        seen_cursors.add(cursor)
+        page, _, cursor = playlist_page(playlist_id, cursor=cursor)
+        songs.extend(page)
+    return {'playlist': item, 'songs': songs}
+
+
 def search_page(args):
     query = str(args.get('query') or '').strip()
     category = str(args.get('category') or 'songs').strip().lower()
-    if category not in ('artists', 'albums', 'songs'):
+    if category not in ('artists', 'albums', 'songs', 'playlists'):
         raise MusicError('Unknown music result type.')
     genre_id = str(args.get('genreId') or '').strip()
     genre_name = str(args.get('genreName') or '').strip()
@@ -503,7 +516,7 @@ def search_page(args):
             if genre_name:
                 items = [item for item in items if genre_matches(item, genre_name)]
     elif not query:
-        if category == 'artists':
+        if category in ('artists', 'playlists'):
             items, raw_count, has_more = [], 0, False
         else:
             items, raw_count, has_more = chart_items(
@@ -1642,6 +1655,8 @@ def dispatch(args):
         return artist_songs_page(args)
     if operation == 'album':
         return album_details(args.get('album') or {})
+    if operation == 'playlist':
+        return playlist_details(args.get('playlist') or {})
     if operation == 'lyrics':
         return fetch_lyrics(args)
     if operation == 'song-info':
@@ -1684,6 +1699,7 @@ def main():
             'artist',
             'artist-info',
             'album',
+            'playlist',
             'lyrics',
             'song-info',
             'file-tags',

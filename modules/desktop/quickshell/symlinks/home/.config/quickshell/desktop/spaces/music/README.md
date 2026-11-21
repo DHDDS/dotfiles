@@ -24,8 +24,9 @@ The path and **Move** action at the bottom are separate from metadata editing.
 Moves preserve the audio extension and do not download uncached songs.
 The notifications bell holds transfer progress and controls.
 
-**Browse** opens your configured Apple Music playlist and searches its
-catalogue. Artist and album pickers search online as you type. Downloads save
+**Browse** opens your configured Apple Music playlist and searches the Apple
+Music catalogue. Open the filter button to find genres, artists, albums and
+public playlists. Downloads save
 tagged FLAC files named `Title - Artist - Album (YYYY-MM-DD).flac` in `~/Music`,
 ready to review and upload. FLAC preserves the source's decoded audio; it does not
 improve a lossy source. Downloads try configured sources in order when a source

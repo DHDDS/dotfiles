@@ -7,7 +7,9 @@ import tempfile
 import unittest
 import xml.etree.ElementTree as ET
 from contextlib import closing
+from email.utils import formatdate
 from pathlib import Path
+from urllib.error import HTTPError
 import sys
 import support
 
@@ -15,6 +17,7 @@ sys.path.insert(0, str(support.DESKTOP))
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from spaces.movies import provider_http
 from spaces.movies.local import LocalLibrary, subtitle_associations
 from spaces.movies.subtitle_backend import (
     OpenSubtitles,
@@ -585,6 +588,35 @@ class SubtitleTests(unittest.TestCase):
     def test_download_requires_account_credentials(self):
         with self.assertRaisesRegex(SubtitleError, 'username and password'):
             OpenSubtitles({'api_key': 'test'}).download(10)
+
+    def test_opensubtitles_honors_an_http_date_on_service_unavailable(self):
+        now = 1_700_000_000
+        error = HTTPError(
+            'https://api.opensubtitles.com/api/v1/subtitles',
+            503,
+            '',
+            {'Retry-After': formatdate(now + 60, usegmt=True)},
+            io.BytesIO(),
+        )
+        client = OpenSubtitles({'api_key': 'test'})
+        with (
+            patch.object(provider_http, '_STATE', None),
+            patch.object(provider_http, '_deadlines', {}),
+            patch.object(provider_http.time, 'time', return_value=now) as clock,
+            patch.object(
+                provider_http.urllib.request,
+                'urlopen',
+                side_effect=[error, io.BytesIO(b'{}')],
+            ) as send,
+        ):
+            with self.assertRaisesRegex(SubtitleError, 'HTTP 503.*60 s'):
+                client.request('/subtitles')
+            clock.return_value = now + 59
+            with self.assertRaisesRegex(SubtitleError, 'wait 1 s'):
+                client.request('/subtitles')
+            self.assertEqual(send.call_count, 1)
+            clock.return_value = now + 60
+            self.assertEqual(client.request('/subtitles'), {})
 
     def test_opensubtitles_login_download_protocol(self):
         class Response(io.BytesIO):

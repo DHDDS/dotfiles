@@ -55,7 +55,7 @@ def parse_playlist_id(value):
 def safe_playlist_id(value):
     value = str(value or '').strip()
     if not re.fullmatch(r'pl\.[A-Za-z0-9._-]{1,120}', value):
-        raise MusicError('The configured Apple Music playlist ID is invalid.')
+        raise MusicError('The Apple Music playlist ID is invalid.')
     return value
 
 
@@ -109,8 +109,12 @@ def apple_cover(attributes):
 
 
 def normalize_apple(item, kind):
-    """Convert one Apple catalog resource of `kind` (songs, albums, artists) to a record."""
-    if not isinstance(item, dict) or kind not in ('songs', 'albums', 'artists'):
+    """Convert one Apple catalog resource of the requested type to a record."""
+    if (
+        not isinstance(item, dict)
+        or kind not in ('songs', 'albums', 'artists', 'playlists')
+        or item.get('type', kind) != kind
+    ):
         return None
     attributes = item.get('attributes') or {}
     relationships = item.get('relationships') or {}
@@ -128,6 +132,11 @@ def normalize_apple(item, kind):
         'source': 'apple',
         'cover': apple_cover(attributes),
     }
+    if kind == 'playlists':
+        return record | {
+            'kind': 'playlist',
+            'title': str(attributes.get('name') or 'Untitled playlist'),
+        }
     if kind == 'artists':
         notes = attributes.get('editorialNotes')
         notes = notes if isinstance(notes, dict) else {}

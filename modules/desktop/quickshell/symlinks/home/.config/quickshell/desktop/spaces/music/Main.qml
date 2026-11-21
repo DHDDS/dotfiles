@@ -551,7 +551,9 @@ Item {
         section = value;
         restoringView = true;
         const view = viewStates[value] || savedViews[value] || {};
-        category = view.category || "songs";
+        // Only artist pages have a category selector. Old top-level settings
+        // can still contain a category that the toolbar no longer offers.
+        category = view.entity?.kind === "artist" ? (view.category || "songs") : "songs";
         genreId = view.genreId || "";
         genreName = view.genreName || "";
         pendingOnly = !!view.pending;
@@ -982,7 +984,7 @@ Item {
         }
         MovieButton {
             id: genreButton
-            visible: root.filtersOpen && root.category !== "artists" && !root.entity
+            visible: root.filtersOpen && !root.entity
             text: root.genreName || "All genres"
             iconName: "music"
             Layout.maximumWidth: 180
@@ -1037,7 +1039,7 @@ Item {
         MovieButton {
             id: playlistPicker
             objectName: "musicPlaylists"
-            visible: !root.entity && root.section === "library" && root.filtersOpen
+            visible: !root.entity && root.filtersOpen
             text: "Playlists"
             onClicked: {
                 picker.parent = playlistPicker;
@@ -1099,7 +1101,7 @@ Item {
         MovieIconButton {
             toolbar: true
             objectName: "musicFilters"
-            visible: !root.entity && root.category !== "artists"
+            visible: !root.entity
             iconName: "sliders-horizontal"
             text: "Music filters"
             highlighted: root.filtersOpen || !!root.genreId

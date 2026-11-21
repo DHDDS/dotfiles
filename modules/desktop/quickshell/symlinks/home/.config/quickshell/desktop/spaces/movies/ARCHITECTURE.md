@@ -120,6 +120,13 @@ used by a personal row (favorite, note, URL) or a local file: favorites and the
 My Library view are built from them. Never clear title records as artwork-cache
 maintenance.
 
+Media metadata and OpenSubtitles API requests honor `Retry-After` on HTTP 429 and
+503, using either a delay in seconds or an HTTP date. Requests to that host fail
+locally with the remaining wait until the deadline passes. Cached results remain
+available. The deadline is shared across workers and Space restarts through
+`$XDG_RUNTIME_DIR/quickshell-media-retry.sqlite`, with an in-process fallback
+when runtime storage is unavailable.
+
 ## Workers and persistence
 
 Provider logic stays here. `Worker.qml` owns one bounded JSON-lines Python process,
@@ -186,11 +193,29 @@ XDG namespace:
   It may link into a private checkout. `paths.media_config()` reads it through
   `integrations/private.py` (regular file, at most 64 KiB, non-blocking) and,
   like `torrents.json`, refuses it unless owner-only when it holds API keys, the
-  OpenSubtitles password or a player command.
+  OpenSubtitles password, a player command or an anime provider command.
 - `~/.config/quickshell/desktop/spaces/movies/media-ui.ini`: view preferences.
   `Settings.value()` returns INI booleans as `"true"`/`"false"` strings once read
   from disk, so restore them by comparing with `"true"`.
 - `~/.local/share/quickshell/desktop/spaces/movies/library.sqlite`: personal/library state.
+
+An `anime_sources` entry can use `strategy: "command"` with a `name`, a
+`command` argument array and optional `audio_mode` (`sub` by default, or `dub`).
+The worker starts the command only for a playback request, without a shell.
+`{config_dir}` expands to the directory containing the resolved `media.json`
+target. The command reads one JSON object with `op: "resolve"`, `malId`,
+`episode` (defaults to 1 for a film) and `mode`. It returns one JSON object
+with `success: true`, an HTTPS `url`, and optional HTTPS `referer` and
+`subtitle` URLs for mpv. Failures return `success: false` and an `error`
+message. The worker allows up to 40 seconds and stops the command when the
+Space closes. Movies and Series can point to the same command from their
+respective media configurations.
+
+An anime source with `strategy: "web"` opens an HTTPS URL in the browser. Give
+it either a `url` template using `{title}`, `{malId}`, `{episode}` and `{mode}`,
+or a `command` using the same protocol as stream commands. Web commands also
+receive `title`, `originalTitle` and `aliases`, and only need to return a URL
+on success.
 
 `~/.config/quickshell/desktop/integrations/media-library.json` is user-owned and
 independent of private provider settings. Only `media-library.json.example` is a

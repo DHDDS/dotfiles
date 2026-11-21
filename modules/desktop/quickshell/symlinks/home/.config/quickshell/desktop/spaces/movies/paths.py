@@ -24,7 +24,7 @@ def media_config(path):
     """media.json as an object, or {} when it is absent.
 
     It may link into a private checkout; the opened target is checked. API keys,
-    the OpenSubtitles account and the executed player command need owner-only
+    the OpenSubtitles account and executable commands need owner-only
     access, like the shared integration credentials.
     """
     try:
@@ -40,13 +40,28 @@ def media_config(path):
     if not isinstance(config, dict):
         raise ConfigError('media.json must contain a JSON object.')
     account = config.get('opensubtitles')
-    sensitive = any(config.get(key) for key in (*CREDENTIALS, 'player')) or (
-        isinstance(account, dict)
-        and any(account.get(key) for key in ('api_key', 'password'))
+    anime = config.get('anime_sources')
+    sensitive = (
+        any(config.get(key) for key in (*CREDENTIALS, 'player'))
+        or (
+            isinstance(account, dict)
+            and any(account.get(key) for key in ('api_key', 'password'))
+        )
+        or (
+            isinstance(anime, list)
+            and any(
+                isinstance(source, dict)
+                and (
+                    source.get('strategy') == 'command'
+                    or (source.get('strategy') == 'web' and 'command' in source)
+                )
+                for source in anime
+            )
+        )
     )
     if sensitive and not private.owner_only(info):
         raise ConfigError(
-            'media.json holds credentials or a player command: '
+            'media.json holds credentials or an executable command: '
             'it must be owned by you with mode 0600.'
         )
     return config

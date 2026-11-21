@@ -68,6 +68,10 @@ services, and runs the module hooks. It skips disk,
 bootloader, account creation, and filesystem snapshot initialization. Reboot
 after applying to activate changed settings.
 
+For edits to existing Quickshell files linked into your home directory, run
+`./apply.sh --restart-shell` to load the changes immediately. Added or removed
+links still require regeneration and a full apply.
+
 Copied files use content comparisons, not timestamps. Clean managed files update
 automatically; local edits and differing files on the first apply get individual
 diff/replace/keep review. Skipped file conflicts return exit status 2. Replaced and

@@ -96,6 +96,43 @@ class MusicTests(unittest.TestCase):
             self.assertEqual(len(result['items']), 1)
             self.assertEqual(page.call_args.args[1], 500)
 
+    def test_catalogue_playlist_search_and_track_pagination(self):
+        cursor = '/v1/catalog/us/playlists/pl.fixture/tracks?offset=2'
+        playlist = {
+            'id': 'pl.fixture',
+            'type': 'playlists',
+            'attributes': {'name': 'Fixture playlist'},
+        }
+        first = {'id': '1', 'type': 'songs', 'attributes': {'name': 'First song'}}
+        video = {'id': '2', 'type': 'music-videos'}
+        last = {'id': '3', 'type': 'songs', 'attributes': {'name': 'Last song'}}
+        with (
+            patch.object(music, 'music_config', return_value={'storefront': 'us'}),
+            patch.object(
+                music,
+                'apple_url',
+                side_effect=[
+                    {'results': {'playlists': {'data': [playlist]}}},
+                    {'data': [first, video], 'next': cursor},
+                ],
+            ) as request,
+            patch.object(music, 'apple_get', return_value={'data': [last]}) as follow,
+        ):
+            result = music.dispatch(
+                {'op': 'search-page', 'category': 'playlists', 'query': 'fixture'}
+            )
+            choice = result['items'][0]
+            self.assertEqual(
+                (choice['kind'], choice['title'], choice['source']),
+                ('playlist', 'Fixture playlist', 'apple'),
+            )
+            details = music.dispatch({'op': 'playlist', 'playlist': choice})
+        self.assertEqual(request.call_args_list[0].args[1]['types'], 'playlists')
+        self.assertEqual(request.call_args.args[0], '/playlists/pl.fixture/tracks')
+        follow.assert_called_once_with('https://api.music.apple.com' + cursor)
+        self.assertEqual(details['playlist'], choice)
+        self.assertEqual([song['id'] for song in details['songs']], ['1', '3'])
+
     def test_matching_preserves_non_latin_titles_and_artists(self):
         wanted = {'title': '千本桜', 'artist': '初音ミク'}
         self.assertEqual(music.score_candidate(wanted, dict(wanted)), 180)

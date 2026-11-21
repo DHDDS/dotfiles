@@ -1,4 +1,4 @@
-"""Config-driven anime playback adapters. Source endpoints stay in media.json."""
+"""Resolve anime playback sources configured in media.json."""
 
 import base64
 import difflib
@@ -9,6 +9,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from http.client import HTTPException
+
+from spaces.pictures.command_provider import safe_url
+from spaces.pictures.provider_plugins import ProviderError
 
 # Search, episode and player pages are small; a configured source cannot exhaust memory.
 MAX_PAGE = 8 * 1024 * 1024
@@ -169,8 +172,8 @@ def _stream_page(source, embed_url):
     }
 
 
-def resolve(source, title, episode, mode):
-    """Resolve a configured MAL-ID or title-search source to a playable stream."""
+def resolve(source, title, episode, mode, *, runner=None, config_path=None):
+    """Resolve a configured source to a playable stream."""
     mal_id = title.get('malId')
     if not str(mal_id).isdigit() or not str(episode).replace('.', '', 1).isdigit():
         raise SourceError('This anime needs a MAL ID and episode number for playback.')
@@ -183,6 +186,41 @@ def resolve(source, title, episode, mode):
         'title': title.get('title', ''),
     }
     strategy = source.get('strategy')
+    if strategy == 'web' and 'url' in source:
+        return {'url': _url(source.get('url'), values)}
+    if strategy in ('command', 'web'):
+        config_dir = str(config_path.resolve().parent)
+        command = [
+            argument.replace('{config_dir}', config_dir)
+            for argument in source['command']
+        ]
+        request = {
+            'op': 'resolve',
+            'malId': int(mal_id),
+            'episode': episode,
+            'mode': mode,
+        }
+        fields = ('url', 'referer', 'subtitle')
+        if strategy == 'web':
+            request.update(
+                title=values['title'],
+                originalTitle=title.get('originalTitle', ''),
+                aliases=title.get('aliases') or [],
+            )
+            fields = ('url',)
+        try:
+            result = runner.call({'command': command, 'env': {}}, request)
+        except ProviderError as error:
+            raise SourceError(str(error)) from None
+        stream = {}
+        for key in fields:
+            value = result.get(key, '')
+            if (key == 'url' or value != '') and not safe_url(value).lower().startswith(
+                'https://'
+            ):
+                raise SourceError('Anime provider returned an invalid HTTPS URL.')
+            stream[key] = value
+        return stream
     if strategy == 'mal_embed':
         return _stream_page(source, _url(source.get('embed_url'), values))
     if strategy != 'search_embed':

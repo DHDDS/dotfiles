@@ -30,6 +30,7 @@ from spaces.movies.local import (
 )
 
 from spaces.movies.paths import CONFIG, DATA, SPACE, ConfigError, media_config
+from spaces.movies.provider_http import open_provider
 
 API = 'https://api.opensubtitles.com/api/v1'
 LANGUAGE_ALIASES = {
@@ -214,7 +215,9 @@ class OpenSubtitles:
             headers['Content-Type'] = 'application/json'
         request = urllib.request.Request(url, data=data, headers=headers)
         try:
-            with urllib.request.urlopen(request, timeout=20) as response:
+            with open_provider(
+                request, timeout=20, error_type=SubtitleError, name='OpenSubtitles'
+            ) as response:
                 raw = response.read(4 * 1024 * 1024 + 1)
                 if len(raw) > 4 * 1024 * 1024:
                     raise SubtitleError('OpenSubtitles returned too much data.')

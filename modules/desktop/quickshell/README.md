@@ -232,7 +232,7 @@ encrypted volumes locks them unless `/etc/crypttab` owns them. Drives are never
 powered off; use the file manager for safe removal. Sleeping ATA drives stay asleep.
 
 ```sh
-systemctl --user restart desktop-shell.service
+./apply.sh --restart-shell
 journalctl --user -b -u desktop-shell.service -n 50
 ```
 

@@ -8,13 +8,14 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from urllib.error import HTTPError
 import sys
 import support
 
 sys.path.insert(0, str(support.DESKTOP))
 from unittest.mock import patch
 
-from spaces.movies import anime_sources
+from spaces.movies import anime_sources, provider_http
 
 spec = importlib.util.spec_from_file_location(
     'media_backend', support.DESKTOP / 'spaces/movies/backend.py'
@@ -982,6 +983,131 @@ class MediaTests(unittest.TestCase):
         self.assertEqual(init['animeProviders'], ['Fixture source'])
         self.assertNotIn('fixture-key', json.dumps(init))
 
+    def test_anime_command_runs_from_the_private_config_and_resolves_playback(self):
+        private_dir = self.backend.config_path.parent / 'private folder'
+        private_dir.mkdir()
+        script = private_dir / 'anime.py'
+        script.write_text(
+            'import json, sys\n'
+            'request = json.load(sys.stdin)\n'
+            "assert request['op'] == 'resolve' and request['malId'] == 7\n"
+            "assert request['episode'] == 2 and request['mode'] == 'dub'\n"
+            'print(json.dumps(dict(success=True, url=sys.argv[1], '
+            "referer='https://example.org/', subtitle='https://example.org/en.vtt')))\n"
+        )
+        provider = {
+            'name': 'Fixture (Dub)',
+            'strategy': 'command',
+            'audio_mode': 'dub',
+            'command': [
+                sys.executable,
+                '{config_dir}/anime.py',
+                'https://example.org/x',
+            ],
+        }
+        self.configure({'anime_sources': [provider]})
+        private_config = private_dir / 'media.json'
+        self.backend.config_path.replace(private_config)
+        self.backend.config_path.symlink_to(private_config)
+        self.assertEqual(
+            self.backend.init({'kind': 'tv'})['animeProviders'], ['Fixture (Dub)']
+        )
+        request = {
+            'op': 'play',
+            'title': {'id': 'mal:7', 'malId': 7, 'kind': 'tv'},
+            'episode': 2,
+        }
+        with patch.object(m.shutil, 'which', return_value='/usr/bin/mpv'):
+            result = self.backend.handle(request)
+            provider['command'][-1] = 'file:///home/video.mkv'
+            self.configure({'anime_sources': [provider]})
+            with self.assertRaisesRegex(m.MediaError, 'invalid HTTPS URL'):
+                self.backend.handle(request)
+        self.assertEqual(
+            result,
+            dict(
+                type='direct',
+                command=[
+                    'mpv',
+                    '--referrer=https://example.org/',
+                    '--sub-file=https://example.org/en.vtt',
+                    '--',
+                    'https://example.org/x',
+                ],
+            ),
+        )
+
+    def test_anime_web_source_opens_an_encoded_title_in_the_browser(self):
+        source = {
+            'name': 'Fixture (Browser)',
+            'strategy': 'web',
+            'url': 'https://example.org/search?query={title}',
+        }
+        self.configure({'anime_sources': [source]})
+        with patch.object(self.backend, 'player', side_effect=AssertionError('mpv')):
+            result = self.backend.handle(
+                {
+                    'op': 'play',
+                    'title': {
+                        'id': 'mal:7',
+                        'malId': 7,
+                        'kind': 'movie',
+                        'title': 'A title & its sequel',
+                    },
+                }
+            )
+        self.assertEqual(
+            result,
+            dict(
+                type='web',
+                url='https://example.org/search?query=A%20title%20%26%20its%20sequel',
+            ),
+        )
+
+    def test_anime_web_command_receives_aliases_and_selected_episode(self):
+        self.configure(
+            {
+                'anime_sources': [
+                    {
+                        'name': 'Fixture (Browser)',
+                        'strategy': 'web',
+                        'command': ['provider'],
+                    }
+                ],
+            }
+        )
+        title = {
+            'id': 'mal:7',
+            'malId': 7,
+            'kind': 'tv',
+            'title': 'English title',
+            'originalTitle': 'Native title',
+            'aliases': ['Romanized title'],
+        }
+        watch_url = 'https://example.org/watch/title?ep=2'
+        with (
+            patch.object(self.backend, 'player', side_effect=AssertionError('mpv')),
+            patch.object(
+                self.backend.anime_commands,
+                'call',
+                return_value={'success': True, 'url': watch_url},
+            ) as command,
+        ):
+            result = self.backend.handle({'op': 'play', 'title': title, 'episode': 2})
+        self.assertEqual(result, {'type': 'web', 'url': watch_url})
+        self.assertEqual(
+            command.call_args.args[1],
+            {
+                'op': 'resolve',
+                'malId': 7,
+                'episode': 2,
+                'mode': 'sub',
+                'title': 'English title',
+                'originalTitle': 'Native title',
+                'aliases': ['Romanized title'],
+            },
+        )
+
     def test_anime_audio_is_owned_by_the_selected_provider(self):
         source = {'name': 'Example (Dub)', 'strategy': 'mal_embed', 'audio_mode': 'dub'}
         self.configure({'player': ['mpv'], 'anime_sources': [source]})
@@ -1178,8 +1304,6 @@ class MediaTests(unittest.TestCase):
         self.assertNotIn('private', output)
 
     def test_error_redacts_credentials(self):
-        from urllib.error import HTTPError
-
         with patch.object(
             m.urllib.request,
             'urlopen',
@@ -1563,6 +1687,8 @@ class MediaTests(unittest.TestCase):
         for secret in (
             {'tmdb_key': 'k'},
             {'player': ['mpv']},
+            {'anime_sources': [{'strategy': 'command', 'command': ['provider']}]},
+            {'anime_sources': [{'strategy': 'web', 'command': ['provider']}]},
             {'opensubtitles': {'password': 'p'}},
         ):
             path.write_text(json.dumps(secret))
@@ -1634,6 +1760,44 @@ class MediaTests(unittest.TestCase):
         self.assertEqual(
             self.backend.spoilers({'title': self.movie})['text'], 'The story.'
         )
+
+    def test_spoilers_obey_wikidata_retry_after_for_every_title_and_worker(self):
+        state = Path(self.tmp.name) / 'retry.sqlite'
+        throttled = HTTPError(
+            'https://query.wikidata.org/sparql',
+            429,
+            '',
+            {'Retry-After': '1000'},
+            Reply(),
+        )
+        other = self.movie | dict(id='tt456', imdbId='tt456')
+        with (
+            patch.object(provider_http, '_STATE', state),
+            patch.object(provider_http, '_deadlines', {}),
+            patch.object(provider_http.time, 'time', return_value=10_000) as clock,
+            patch.object(
+                m.urllib.request,
+                'urlopen',
+                side_effect=[throttled, Reply(b'{}'), Reply(b'{}')],
+            ) as send,
+        ):
+            with self.assertRaisesRegex(m.MediaError, 'HTTP 429.*1000 s'):
+                self.backend.spoilers({'title': self.movie})
+            self.assertTrue(throttled.fp.closed)
+
+            with patch.object(provider_http, '_deadlines', {}):
+                clock.return_value += 40
+                with self.assertRaisesRegex(m.MediaError, 'wait 960 s'):
+                    self.backend.spoilers({'title': other})
+                self.assertEqual(send.call_count, 1)
+                self.assertEqual(m.http('https://en.wikipedia.org/w/api.php'), {})
+
+                clock.return_value += 960
+                self.assertEqual(
+                    self.backend.spoilers({'title': other})['text'],
+                    'No Wikipedia plot is available.',
+                )
+                self.assertEqual(send.call_count, 3)
 
     def test_anime_spoilers_find_matching_wikipedia_plot_without_imdb(self):
         anime = {

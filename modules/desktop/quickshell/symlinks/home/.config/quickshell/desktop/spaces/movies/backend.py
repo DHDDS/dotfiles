@@ -23,6 +23,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from spaces.movies import anime_sources
 from spaces.movies.local import LocalLibrary
+from spaces.movies.provider_http import open_provider
 from spaces.movies.records import (
     TMDB_GENRES,
     MediaError,
@@ -42,6 +43,7 @@ from spaces.movies.records import (
 )
 
 from spaces.movies.paths import DATA, ROOT, ConfigError, media_config
+from spaces.pictures.command_provider import CommandRunner
 
 TMDB = 'https://api.themoviedb.org/3'
 OMDB = 'https://www.omdbapi.com/'
@@ -134,7 +136,7 @@ def http(url, params=None, *, timeout=15):
         req = urllib.request.Request(
             url, headers={'User-Agent': 'MoviesSpace/1.0', 'Accept': 'application/json'}
         )
-        with urllib.request.urlopen(req, timeout=timeout) as response:
+        with open_provider(req, timeout=timeout, error_type=MediaError) as response:
             return read_json(response, host)
     except urllib.error.HTTPError as e:
         e.close()
@@ -158,7 +160,9 @@ def official_anime(url, client_id, params=None):
         },
     )
     try:
-        with urllib.request.urlopen(request, timeout=15) as response:
+        with open_provider(
+            request, timeout=15, error_type=MediaError, name='MAL'
+        ) as response:
             return read_json(response, 'MAL')
     except urllib.error.HTTPError as error:
         status = error.code
@@ -193,7 +197,9 @@ def anilist(query, variables=None):
         },
     )
     try:
-        with urllib.request.urlopen(request, timeout=15) as response:
+        with open_provider(
+            request, timeout=15, error_type=MediaError, name='AniList'
+        ) as response:
             result = read_json(response, 'AniList')
     except urllib.error.HTTPError as error:
         status = error.code
@@ -255,6 +261,7 @@ class Backend:
         data = data or DATA
         self.config_path, self.data = config, data
         self.write_lock = threading.RLock()
+        self.anime_commands = CommandRunner(timeout=40, label='Anime')
         config.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         for p in (data,):
             p.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -327,13 +334,38 @@ class Backend:
                 not isinstance(source, dict)
                 or not isinstance(source.get('name'), str)
                 or not source['name'].strip()
-                or source.get('strategy') not in ('mal_embed', 'search_embed')
+                or source.get('strategy')
+                not in ('mal_embed', 'search_embed', 'command', 'web')
             ):
                 raise MediaError(
                     'Each anime source needs a name and supported strategy.'
                 )
             if source.get('audio_mode', 'sub') not in ('sub', 'dub'):
                 raise MediaError('Anime source audio_mode must be sub or dub.')
+            if source['strategy'] == 'web':
+                if ('url' in source) == ('command' in source):
+                    raise MediaError(
+                        'Anime web source needs a URL template or command.'
+                    )
+                if 'url' in source and (
+                    not isinstance(source['url'], str) or not source['url'].strip()
+                ):
+                    raise MediaError('Anime web source needs a URL template.')
+            if source['strategy'] == 'command' or (
+                source['strategy'] == 'web' and 'command' in source
+            ):
+                command = source.get('command')
+                if (
+                    not isinstance(command, list)
+                    or not command
+                    or not all(
+                        isinstance(arg, str) and arg and '\0' not in arg
+                        for arg in command
+                    )
+                ):
+                    raise MediaError(
+                        'Anime source command must be a nonempty argument array.'
+                    )
         return config
 
     def mal_client_id(self):
@@ -1609,17 +1641,25 @@ class Backend:
             index = r.get('provider', 0)
             if not isinstance(index, int) or index < 0 or index >= len(sources):
                 raise MediaError('Choose an available anime source in media.json.')
-            player = self.player(mpv=True)
+            source = sources[index]
+            web = source['strategy'] == 'web'
+            player = None if web else self.player(mpv=True)
             try:
                 stream = anime_sources.resolve(
-                    sources[index],
+                    source,
                     t,
                     r.get('episode') or 1,
-                    sources[index].get('audio_mode', 'sub'),
+                    source.get('audio_mode', 'sub'),
+                    runner=self.anime_commands,
+                    config_path=self.config_path,
                 )
             except anime_sources.SourceError as error:
                 raise MediaError(str(error)) from None
-            command = player + ['--referrer=' + stream['referer']]
+            if web:
+                return dict(type='web', url=stream['url'])
+            command = player
+            if stream['referer']:
+                command.append('--referrer=' + stream['referer'])
             if stream['subtitle']:
                 command.append('--sub-file=' + stream['subtitle'])
             return dict(type='direct', command=command + ['--', stream['url']])
@@ -1721,8 +1761,8 @@ class Backend:
 def main():
     from spaces.movies.worker import serve, own_process_group
 
-    own_process_group()
     backend = Backend()
+    own_process_group(backend.anime_commands.close)
     backend.prune_cache()
     serve(
         backend.handle,

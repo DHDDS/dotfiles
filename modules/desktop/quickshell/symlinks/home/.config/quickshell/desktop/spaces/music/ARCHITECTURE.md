@@ -7,9 +7,11 @@ surface and controls as Radio. A fresh instance opens My Library, all songs, wit
 no filters. Tabs preserve in-memory queries, navigation, results and scroll.
 The general search filters songs; `MusicPicker.qml` owns searchable, virtualized
 artist/album/playlist menus. Artist and album pickers are grouped with Genres
-behind the filter button in both tabs; playlists are library-only.
-Library pickers read indexed metadata immediately;
-Browse pickers wait for two query characters and search Apple dynamically.
+and Playlists behind the filter button in both tabs. Top-level views open in
+Songs, including when restoring older preferences with a different category.
+Library pickers read saved metadata immediately. Browse pickers wait for two
+query characters and search the Apple catalogue. Opening an Apple playlist
+follows the track cursors in order and loads the songs before enabling Play all.
 Artist pages enrich their header independently of song reads, first from
 Subsonic `getArtistInfo2`, then Apple when needed. Server artist images carry an
 access token, so the cloud worker caches them and QML gets a local file. Enrichment

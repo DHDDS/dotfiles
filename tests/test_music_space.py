@@ -10,10 +10,16 @@ def setup(root):
     path = root / 'spaces/music/backend.py'
     fixture = """
 _fixture_song = dict(id="1",kind="song",source="apple",title="Fixture song",artist="Fixture artist",album="Fixture album",duration=120)
+_fixture_playlist = dict(id="pl.fixture",kind="playlist",source="apple",title="Fixture playlist")
 _original_dispatch = dispatch
 def dispatch(args):
     op = args["op"]
-    if op == "search-page": return dict(items=[_fixture_song],limit=1,hasMore=False)
+    if op == "search-page":
+        if args["category"] == "playlists":
+            return dict(items=[_fixture_playlist] if args["query"] == "fixture" else [],limit=1,hasMore=False)
+        return dict(items=[_fixture_song],limit=1,hasMore=False)
+    if op == "playlist" and args["playlist"] == _fixture_playlist:
+        return dict(playlist=_fixture_playlist,songs=[dict(_fixture_song,title="Playlist track")])
     if op == "genres": return [dict(id="1",name="Rock")]
     if op == "lyrics": return dict(available=True,lyrics="Fixture lyrics",provider="Fixture")
     if op == "download-capabilities": return dict(track=False,album=False)
@@ -68,6 +74,70 @@ for line in sys.stdin:
 @unittest.skipUnless(support.QS, 'Quickshell required')
 class MusicSpaceTests(unittest.TestCase):
     run_qml = support.run_qml
+
+    def test_browse_restores_filters_and_opens_catalogue_playlist(self):
+        def legacy_settings(root):
+            setup(root)
+            settings = root / 'config/quickshell/desktop/spaces/music/music-ui.json'
+            settings.parent.mkdir(parents=True, exist_ok=True)
+            settings.write_text('{"views":{"discover":{"category":"artists"}}}')
+
+        self.run_qml(
+            """import QtQuick
+import QtTest
+import Quickshell
+import "ui"
+ShellRoot {
+ InteractionState { id: interactions }
+ SpaceHost { id: host; interactionState: interactions }
+ TestCase { id: input; when: false; parent: host.contentItem }
+ property int step: 0
+ function check(value,message) { if (!value) throw Error(message); }
+ function find(item,name) {
+  if (item.objectName === name) return item;
+  for (const child of item.children ?? []) { const match = find(child,name); if (match) return match; }
+  return null;
+ }
+ Timer { id: driver; interval: 100; running: true; onTriggered: { try {
+  if (step === 0) { SpaceState.open("music",Quickshell.screens[0]); step++; return; }
+  const page = host.currentPage;
+  if (!page || !page.initialized || page.loading) return;
+  const toolbar = page.toolbarTarget;
+  if (step === 1) { input.mouseClick(find(toolbar,"musicDiscoverTab")); step++; return; }
+  const filters = find(toolbar,"musicFilters");
+  const playlists = find(toolbar,"musicPlaylists");
+  const picker = Array.from(page.data).find(item => item.objectName === "musicPicker");
+  if (step === 2) {
+   check(page.section === "discover" && page.category === "songs" && filters.visible,"legacy artist view hid Browse filters");
+   check(filters.contentItem.status === Image.Ready,"filter icon missing");
+   input.mouseClick(filters);
+   check(playlists.visible,"Playlists missing from Browse filters");
+   step++; return;
+  }
+  if (step === 3) {
+   input.mouseClick(playlists);
+   check(picker.visible && picker.category === "playlists","Playlists picker did not open");
+   find(picker.contentItem,"musicPickerSearch").text = "fixture";
+   step++; return;
+  }
+  if (step === 4 && picker.items.length) {
+   check(picker.items[0].title === "Fixture playlist","catalogue playlist missing");
+   input.keyClick(Qt.Key_Down);
+   input.keyClick(Qt.Key_Return);
+   step++; return;
+  }
+  if (step === 5) {
+   check(!picker.visible && page.entity?.kind === "playlist" && !filters.visible,"playlist mode did not open");
+   check(page.rows[0]?.title === "Playlist track","playlist tracks did not load");
+   page.back();
+   check(!page.entity && filters.visible && page.rows[0]?.title === "Fixture song","Back did not restore Browse");
+   SpaceState.close("music"); console.log("DISPLAY_PASS"); Qt.quit();
+  }
+ } catch (error) { console.error("DISPLAY_FAIL",String(error)); Qt.quit(); } finally { driver.restart(); } } }
+ Timer { interval: 7000; running: true; onTriggered: { console.error("DISPLAY_FAIL timeout",step); Qt.quit(); } }
+}""",
+            setup=legacy_settings,
+        )
 
     def test_transfer_start_failure_uses_notifications(self):
         self.run_qml(
