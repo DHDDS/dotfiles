@@ -2,7 +2,8 @@
     "packages": [
         "pyalpm",
         "pacman-contrib",
-        "archlinux-contrib"
+        "archlinux-contrib",
+        "arch-wiki-lite"
     ],
     "extra": {
         "aur_packages": [

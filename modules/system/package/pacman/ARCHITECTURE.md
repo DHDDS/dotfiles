@@ -4,6 +4,7 @@ This module owns pacman-contrib (including pacdiff and paccache) and
 archlinux-contrib (checkservices). The mirrorlist module owns only mirror policy,
 Reflector and pkgstats. Hooks are copied into `/etc/pacman.d/hooks` by normal
 asset publication; adding them to the manifest does not install them on the host.
+The module also installs arch-wiki-lite for offline ArchWiki access.
 
 `99-report-orphans.hook` runs after install, upgrade or removal transactions.
 `pacman-report-orphans` queries `pacman -Qtdq` with a ten-second deadline. Exit 1

@@ -1,5 +1,3 @@
 {
-    "packages": [
-        "git"
-    ]
+  "packages": ["git", "gh", "glab"]
 }
